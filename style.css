@@ -268,3 +268,15 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
   .home-layout { grid-template-columns: 1fr; }
   .activity-panel { position: static; max-height: 420px; order: 2; }
 }
+
+/* Vuruşlar (beat), kanon galerisi */
+.need-head { margin-top: 6px; }
+.at-chip { display: inline-block; font-size: 12px; background: color-mix(in srgb, var(--accent) 15%, var(--surface-2)); border-radius: 6px; padding: 1px 6px; }
+.link-btn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-weight: 600; }
+.link-btn:hover { text-decoration: underline; }
+.btn.small { padding: 5px 12px; font-size: 13px; }
+.canon-add { margin: 6px 0 4px; }
+.modal-card.wide { max-width: 980px; }
+.canon-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); max-height: 60vh; overflow: auto; }
+
+.btn[hidden] { display: none; }

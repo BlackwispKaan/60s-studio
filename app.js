@@ -61,7 +61,7 @@ function toast(msg, err = false) {
   clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), err ? 6000 : 2600);
 }
 function openModal(html) { $('#modalBody').innerHTML = html; $('#modal').hidden = false; }
-function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
+function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; $('#modal .modal-card').classList.remove('wide'); }
 
 /* ---------- storage backends ---------- */
 class GitHubStore {
@@ -458,8 +458,8 @@ function refsHtml(refs) {
 
 // Claude'un indirdiği meme/sfx adayları: önizleme + "Seç" butonu
 function candidatesHtml(slug, sec, o, n) {
-  const pv = (f) => `games/${slug}/previews/${f}`;
   return `<div class="cands">${n.candidates.map((c) => {
+    const pv = (f) => `${c.pvBase || `games/${slug}/previews/`}${f}`;
     const on = n.chosen === c.id;
     const isSfx = !!c.audio;
     return `<div class="cand ${on ? 'chosen' : ''}" data-cand="${esc(c.id)}">
@@ -490,8 +490,12 @@ function customCandHtml(sec, o, n) {
 }
 
 function needHtml(slug, sec, o, n) {
-  const head = `<div>${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}</div>`;
-  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
+  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
+  const others = sec.options.filter((x) => x.id !== o.id).flatMap((x) => (x.needs || []).filter((m) => m.type === n.type && m.candidates?.length)).length;
+  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.at ? ` <span class="at-chip">⏱ “${esc(n.at)}”</span>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
+    ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}</div>`;
+  const cross = n.candidates?.length && others ? `<button type="button" class="link-btn small cross-btn" data-cross="${key}">↔ Bölümdeki diğer seçeneklerin adaylarından seç</button>` : '';
+  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) + cross : refsHtml(n.refs));
 }
 
 function optionHtml(sec, o, slug) {
@@ -503,7 +507,9 @@ function optionHtml(sec, o, slug) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      ${o.needs?.length ? `<dt>Ek ihtiyaç</dt><dd>${o.needs.map((n) => needHtml(slug, sec, o, n)).join('')}</dd>` : ''}
+      <dt>Meme / ses</dt><dd>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n) => needHtml(slug, sec, o, n)).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
+        <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
+      ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
     </dl>
   </div>`;
@@ -667,6 +673,41 @@ async function playPreview(el) {
 
 const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length);
 
+/* ---------- Meme Kanonu galerisi ---------- */
+async function canonModal(onAdd) {
+  openModal(`<h2>🏆 Meme Kanonu</h2><div class="empty"><span class="spinner"></span></div>`);
+  if (!S.canon) S.canon = (await readJSON('_studio/memes/canon.json'))?.data || [];
+  const pv = (f) => `_studio/memes/previews/${f}`;
+  const draw = (q = '') => {
+    const ql = q.toLowerCase();
+    const list = S.canon.filter((c) => !ql || [c.name, c.tr, c.use, ...(c.tags || [])].join(' ').toLowerCase().includes(ql));
+    $('#canonGrid').innerHTML = list.map((c) => `<div class="cand" data-cid="${esc(c.id)}">
+      <button type="button" class="cand-media" data-play="${esc(pv(c.video))}" data-kind="meme"><img data-src="${esc(pv(c.thumb))}" alt=""><span class="play-badge">▶</span></button>
+      <div class="cand-title"><b>${esc(c.name)}</b><div class="small muted">${esc(c.tr)}</div><div class="small">🎯 ${esc(c.use)}</div></div>
+      <div class="cand-actions"><button type="button" class="btn canon-pick" data-cid="${esc(c.id)}">Seç</button></div></div>`).join('') || '<p class="muted">Sonuç yok.</p>';
+    hydrateThumbs();
+    document.querySelectorAll('#canonGrid .cand-media').forEach((el) => el.onclick = () => playPreview(el));
+    document.querySelectorAll('.canon-pick').forEach((b) => b.onclick = () => {
+      const c = S.canon.find((x) => x.id === b.dataset.cid);
+      $('#canonPicked').hidden = false;
+      $('#canonPickedName').textContent = c.name;
+      $('#canonAt').focus();
+      $('#canonAddBtn').onclick = () => { const at = $('#canonAt').value.trim(); closeModal(); onAdd(c, at); toast(`${c.name} eklendi ✓`); };
+    });
+  };
+  $('#modalBody').innerHTML = `<h2>🏆 Meme Kanonu</h2>
+    <p class="small muted" style="margin-top:0">Herkesin bildiği ${S.canon.length} meme, orijinal sahneleriyle. Önizlemek için tıkla, eklemek için Seç.</p>
+    <input type="text" id="canonQ" placeholder="Ara: polis, kaçış, şaşkınlık, para, ölüm, siyasi…" style="width:100%;margin-bottom:10px">
+    <div id="canonPicked" class="card" hidden style="margin-bottom:10px">
+      <b id="canonPickedName"></b> · Anlatımın hangi kelimesinde/anında girsin?
+      <div class="row" style="margin-top:6px"><input type="text" id="canonAt" style="flex:1" placeholder="örn. “five-star wanted level” sonrası"><button class="btn btn-primary" id="canonAddBtn">Ekle</button></div>
+    </div>
+    <div id="canonGrid" class="cands canon-grid"></div>`;
+  $('#modal .modal-card').classList.add('wide');
+  $('#canonQ').oninput = (e) => draw(e.target.value);
+  draw();
+}
+
 function updateFooter(g) {
   const st = stats(g);
   const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
@@ -713,6 +754,51 @@ function bindGame(g0) {
     };
   });
   document.querySelectorAll('.cands a').forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
+  const findNeed = (x, sid, oid, file) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
+  // ↔ Aynı bölümdeki diğer seçeneklerin adaylarından seç
+  document.querySelectorAll('.cross-btn').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file] = b.dataset.cross.split('|');
+    const sec = g.sections.find((s) => s.id === sid), target = findNeed(g, sid, oid, file);
+    const pool = sec.options.filter((x) => x.id !== oid).flatMap((x) => (x.needs || []).filter((m) => m.type === target.type).flatMap((m) => (m.candidates || []).map((c) => ({ c, from: `${x.id.toUpperCase()} · ${m.desc}` }))));
+    openModal(`<h2>Diğer seçeneklerin adayları</h2><p class="small muted">Seçtiğin aday bu seçeneğe eklenir ve seçilir.</p>
+      <div class="cands">${pool.map(({ c, from }, i) => `<div class="cand">
+        <button type="button" class="cand-media ${c.audio ? 'sfx' : ''}" data-play="${esc((c.pvBase || `games/${slug}/previews/`) + (c.audio || c.video))}" data-kind="${c.audio ? 'sfx' : 'meme'}">${c.audio ? '<span class="sfx-icon">🔊</span>' : `<img data-src="${esc((c.pvBase || `games/${slug}/previews/`) + c.thumb)}" alt="">`}<span class="play-badge">▶</span></button>
+        <div class="cand-title">${esc(c.title)}<div class="small muted">${esc(from)}</div></div>
+        <div class="cand-actions"><button type="button" class="btn btn-primary cross-pick" data-i="${i}">Bunu kullan</button></div></div>`).join('')}</div>`);
+    hydrateThumbs();
+    document.querySelectorAll('#modalBody .cand-media[data-play]').forEach((el) => el.onclick = () => playPreview(el));
+    document.querySelectorAll('.cross-pick').forEach((pb) => pb.onclick = () => {
+      const c = pool[+pb.dataset.i].c;
+      queueOp(slug, (x) => { const n = findNeed(x, sid, oid, file); if (!n.candidates.some((k) => k.id === c.id)) n.candidates.push({ ...c }); n.chosen = c.id; }, `${file} → ${c.id}`);
+      closeModal(); renderGame(slug);
+    });
+  });
+  // + Kanondan meme ekle
+  document.querySelectorAll('.canon-add').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid] = b.dataset.canonAdd.split('|');
+    canonModal(async (c, at) => {
+      const idx = g.sections.findIndex((s) => s.id === sid) + 1;
+      const file = `S${idx}_meme_${c.id}.mp4`, who = S.user;
+      queueOp(slug, (x) => {
+        const o = x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid);
+        o.needs = o.needs || [];
+        if (o.needs.some((n) => n.file === file)) return;
+        o.needs.push({ type: 'meme', file, desc: `${c.name} (${c.tr})`, at, added: true, addedBy: who,
+          candidates: [{ id: c.lib, title: c.name, source: 'canon', page: c.page, duration: c.duration, style: c.style, thumb: c.thumb, video: c.video, pvBase: '_studio/memes/previews/' }], chosen: c.lib });
+      }, `${file} kanondan eklendi`);
+      renderGame(slug);
+    });
+  });
+  document.querySelectorAll('.need-del').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    const [sid, oid, file] = b.dataset.del.split('|');
+    queueOp(slug, (x) => { const o = x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid); o.needs = o.needs.filter((n) => n.file !== file); }, `${file} kaldırıldı`);
+    renderGame(slug);
+  });
 
   document.querySelectorAll('.opt').forEach((btn) => btn.onclick = (ev) => {
     if (ev.target.closest('.cands, .refs')) return;
