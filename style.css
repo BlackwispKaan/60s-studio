@@ -182,3 +182,13 @@ details summary { cursor: pointer; font-weight: 600; }
   .opt-meta dd { margin-bottom: 4px; }
   .new-game { flex-direction: column; }
 }
+
+/* Örnek referanslar (meme/sfx önizleme) */
+.refs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 8px; }
+.ref { display: flex; flex-direction: column; width: 150px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; text-decoration: none; font-size: 12px; line-height: 1.35; }
+.ref:hover { border-color: var(--accent); }
+.ref img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--surface-2); display: block; }
+.ref-icon { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9; background: var(--surface-2); font-size: 22px; font-weight: 700; color: var(--muted); }
+.ref-label { padding: 6px 8px; color: var(--text); }
+.opening { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 12px; margin-top: 12px; font-size: 14px; }
+@media (max-width: 600px) { .ref { width: calc(50% - 4px); } }

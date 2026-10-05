@@ -187,7 +187,7 @@ function buildMaterials(g) {
   g.sections.forEach((s, i) => {
     (s.gameplay || []).forEach((x) => add({ id: x.id, type: 'gameplay', section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '' }));
     const o = selectedOpt(s);
-    (o?.needs || []).forEach((x, j) => add({ id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '' }));
+    (o?.needs || []).forEach((x, j) => add({ id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] }));
   });
   return out;
 }
@@ -197,7 +197,7 @@ function narrationScript(g) {
 function materialsMarkdown(g) {
   const mats = g.materials;
   const by = (t) => mats.filter((m) => m.type === t);
-  const line = (m) => `- [${m.done ? 'x' : ' '}] **${m.section}** ${m.desc}\n  - Dosya adı: \`${m.file}\`${m.source ? `\n  - Kaynak: ${m.source}` : ''}${m.search ? `\n  - Arama: "${m.search}"` : ''}`;
+  const line = (m) => `- [${m.done ? 'x' : ' '}] **${m.section}** ${m.desc}\n  - Dosya adı: \`${m.file}\`${m.source ? `\n  - Kaynak: ${m.source}` : ''}${m.search ? `\n  - Arama: "${m.search}"` : ''}${(m.refs || []).map((r) => `\n  - Örnek: [${r.label}](${r.url})`).join('')}`;
   const st = stats(g);
   return `# ${g.title} — Materyal Listesi
 
@@ -340,25 +340,34 @@ function pipelineHtml(g) {
   return `<div class="pipeline">${STEPS.map((s, i) => `<div class="step ${i < cur ? 'done' : ''} ${i === cur ? 'current' : ''}"><div class="bar"></div>${s}</div>`).join('')}</div>`;
 }
 
+const REF_ICON = { youtube: '▶', gif: 'GIF', sfx: '🔊', stock: '🎞', search: '🔎', local: '📁' };
+function refsHtml(refs) {
+  if (!refs?.length) return '';
+  return `<div class="refs">${refs.map((r) => `<a class="ref" href="${esc(r.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+    ${r.thumb ? `<img src="${esc(r.thumb)}" alt="" loading="lazy">` : `<span class="ref-icon">${REF_ICON[r.kind] || '🔗'}</span>`}
+    <span class="ref-label">${esc(r.label)}</span></a>`).join('')}</div>`;
+}
+
 function optionHtml(sec, o) {
   const on = sec.selected === o.id;
-  return `<button class="opt ${on ? 'selected' : ''}" data-sec="${esc(sec.id)}" data-opt="${esc(o.id)}" type="button">
+  return `<div class="opt ${on ? 'selected' : ''}" data-sec="${esc(sec.id)}" data-opt="${esc(o.id)}" role="button" tabindex="0">
     <span class="radio"></span>
     <div class="opt-en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${esc(o.narration)}”</div>
     <div class="opt-tr">🇹🇷 ${esc(o.tr)}</div>
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      ${o.needs?.length ? `<dt>Ek ihtiyaç</dt><dd>${o.needs.map((n) => `${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}`).join('<br>')}</dd>` : ''}
+      ${o.needs?.length ? `<dt>Ek ihtiyaç</dt><dd>${o.needs.map((n) => `<div>${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}</div>${refsHtml(n.refs)}`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
     </dl>
-  </button>`;
+  </div>`;
 }
 
-function sectionHtml(sec, i, editable) {
+function sectionHtml(sec, i, editable, opening) {
   return `<section class="card" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
     <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
+    ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
     <div class="options">${sec.options.map((o) => optionHtml(sec, o)).join('')}</div>
     <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="Bu bölüm için not / kendi fikrin (opsiyonel)" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
@@ -384,6 +393,7 @@ function materialsHtml(g) {
           <div class="row" style="gap:6px"><span class="mat-type t-${esc(m.type)}">${esc(TYPE_LABEL[m.type])}</span><span class="small muted">${esc(m.section)}</span>${m.doneBy ? `<span class="small muted">· ✓ ${esc(m.doneBy)}</span>` : ''}</div>
           <div class="mat-desc">${esc(m.desc)}</div>
           <div class="small muted"><code>${esc(m.file)}</code>${m.source ? ` · ${esc(m.source)}` : ''}${m.search ? ` · 🔎 “${esc(m.search)}”` : ''}</div>
+          ${refsHtml(m.refs)}
         </div>
       </label>`).join('')).join('')}
     <div class="mat"><span style="width:20px">🎙️</span><div><span class="mat-type t-voice">Anlatıcı</span><div class="mat-desc">ElevenLabs seslendirmesi: Claude API ile tek seferde otomatik üretir.</div></div></div>
@@ -437,7 +447,7 @@ async function renderGame(slug) {
             <div class="seg" id="capSeg">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" ${editable ? '' : 'disabled'}>${c.label}</button>`).join('')}</div></div>
           <p class="small muted" id="capHint" style="margin:10px 0 0">${esc(CAPTIONS.find((c) => c.v === g.settings.captions)?.hint)}</p>
         </section>
-        ${g.sections.map((s, i) => sectionHtml(s, i, editable)).join('')}` : ''}
+        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening)).join('')}` : ''}
       ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(l.by)}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
     </div>
     ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
