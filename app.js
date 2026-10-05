@@ -8,6 +8,8 @@ const WORDS_PER_SEC = 2.6; // ~155 kelime/dk anlatım hızı
 
 const STATUS = {
   queued_research: { label: 'Araştırma sırada', step: 0 },
+  researching:     { label: 'Araştırılıyor', step: 0 },
+  queued_regen:    { label: 'Yeniden öneriliyor', step: 1 },
   choosing:        { label: 'Seçim yapılıyor', step: 1 },
   collecting:      { label: 'Materyal toplanıyor', step: 2 },
   queued_edit:     { label: 'Kurgu sırada', step: 3 },
@@ -489,7 +491,11 @@ function sectionHtml(sec, i, editable, opening, slug) {
     ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
     <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
-    <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="Bu bölüm için not / kendi fikrin (opsiyonel)" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
+    <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="${sec.regen ? 'Yeni tema / istek: ör. “Pauselock esprisi olsun, oyunu durdurup kaçan oyunculara gönderme”' : 'Bu bölüm için not / kendi fikrin (opsiyonel)'}" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="btn ${sec.regen ? 'btn-primary' : 'btn-ghost'} small regen-btn" data-regen="${esc(sec.id)}" ${editable ? '' : 'disabled'}>${sec.regen ? '🔄 Yeniden önerilecek ✓' : '🔄 Bu bölümü yeniden öner'}</button>
+      <span class="small muted">${sec.regen ? 'Notuna göre 3 yeni seçenek hazırlanacak. Alttan <b>Tekrar yap</b>\'a bas.' : 'Seçenekleri beğenmediysen notuna kendi temanı yaz ve işaretle.'}</span>
+    </div>
   </section>`;
 }
 
@@ -561,7 +567,8 @@ async function renderGame(slug) {
     </div>
     ${pipelineHtml(g)}
     <div class="stack" style="margin-top:20px">
-      ${g.status === 'queued_research' ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">Claude araştırma yapacak</h2><p class="muted">İş kuyrukta. Kağan'ın bilgisayarı açıkken birkaç dakika içinde işlenir ve senaryo seçenekleri burada görünür.</p></div>` : ''}
+      ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? 'Claude araştırıyor…' : 'Claude araştırma yapacak'}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
+      ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>Claude yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
       ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">Claude kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
@@ -573,6 +580,11 @@ async function renderGame(slug) {
             <div class="seg" id="capSeg">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" ${editable ? '' : 'disabled'}>${c.label}</button>`).join('')}</div></div>
           <p class="small muted" id="capHint" style="margin:10px 0 0">${esc(CAPTIONS.find((c) => c.v === g.settings.captions)?.hint)}</p>
         </section>
+        <section class="card">
+          <div class="row"><h2>🎯 Genel tema / istek</h2><span class="spacer"></span>
+            <label class="chip small"><input type="checkbox" id="regenAll" ${g.regenAll ? 'checked' : ''} ${editable ? '' : 'disabled'}> Tüm videoyu buna göre yeniden öner</label></div>
+          <textarea id="briefIn" class="note-input" rows="2" placeholder="Opsiyonel. Videonun genel havası veya mutlaka olmasını istediğiniz espri. Örn: “Pauselock meme'i ana espri olsun, final de ona bağlansın.”" ${editable ? '' : 'disabled'}>${esc(g.brief || '')}</textarea>
+        </section>
         ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening, g.slug)).join('')}` : ''}
       ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(l.by)}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
     </div>
@@ -580,6 +592,7 @@ async function renderGame(slug) {
       <span class="stat"><b id="stChosen">${st.chosen}/${st.total}</b> <span class="small muted">bölüm</span></span>
       <span class="stat"><b id="stSecs">~${st.secs}</b> <span class="small muted">sn anlatım</span></span>
       <span class="spacer"></span>
+      <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
       ${g.status === 'collecting' ? `<button class="btn" id="startBtn">▶ Başla</button>` : ''}
       <button class="btn btn-primary" id="exportBtn" ${st.chosen === st.total ? '' : 'disabled'}>Çıktı al</button>
     </div></div>` : ''}
@@ -626,8 +639,11 @@ async function playPreview(el) {
   } catch { toast('Video yüklenemedi', true); el.classList.remove('loading'); }
 }
 
+const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length);
+
 function updateFooter(g) {
   const st = stats(g);
+  const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
   const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
   const s = $('#stSecs'); if (s) { s.textContent = `~${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
   const b = $('#exportBtn'); if (b) b.disabled = st.chosen !== st.total;
@@ -682,6 +698,41 @@ function bindGame(g0) {
     btn.parentElement.querySelectorAll('.opt').forEach((b) => b.classList.toggle('selected', b.dataset.opt === val));
     updateFooter(g);
   });
+  document.querySelectorAll('.regen-btn').forEach((b) => b.onclick = () => {
+    const sid = b.dataset.regen;
+    const sec = g.sections.find((s) => s.id === sid);
+    const val = !sec.regen;
+    const note = document.querySelector(`[data-note="${sid}"]`).value.trim();
+    if (val && !note) { toast('Önce not kutusuna yeni temayı / isteğini yaz.', true); document.querySelector(`[data-note="${sid}"]`).focus(); return; }
+    queueOp(slug, (x) => { const s = x.sections.find((s) => s.id === sid); s.regen = val; s.note = note; }, `${sid} yeniden öner: ${val ? 'evet' : 'hayır'}`);
+    b.classList.toggle('btn-primary', val); b.classList.toggle('btn-ghost', !val);
+    b.textContent = val ? '🔄 Yeniden önerilecek ✓' : '🔄 Bu bölümü yeniden öner';
+    updateFooter(g);
+  });
+  const brief = $('#briefIn');
+  if (brief) brief.onchange = () => { const v = brief.value.trim(); queueOp(slug, (x) => { x.brief = v; }, 'genel tema'); };
+  const ra = $('#regenAll');
+  if (ra) ra.onchange = () => {
+    if (ra.checked && !$('#briefIn').value.trim()) { ra.checked = false; toast('Önce genel tema alanına isteğini yaz.', true); $('#briefIn').focus(); return; }
+    const v = ra.checked, b = $('#briefIn').value.trim();
+    queueOp(slug, (x) => { x.regenAll = v; x.brief = b; }, `tüm video yeniden: ${v}`); updateFooter(g);
+  };
+  const rgb = $('#regenBtn');
+  if (rgb) rgb.onclick = async () => {
+    const ids = g.regenAll ? g.sections.map((s) => s.id) : g.sections.filter((s) => s.regen).map((s) => s.id);
+    if (!ids.length) return;
+    if (!confirm(`${g.regenAll ? 'Tüm video' : ids.length + ' bölüm'} notlarınıza göre yeniden önerilecek. Bu bölümlerdeki mevcut seçimler sıfırlanır. Devam?`)) return;
+    rgb.disabled = true;
+    try {
+      await flush(slug);
+      await mutateGame(slug, (x) => {
+        x.status = 'queued_regen'; x.regenSections = ids;
+        logLine(x, `Yeniden öneri istendi: ${g.regenAll ? 'tüm video' : ids.map((id) => 'S' + (x.sections.findIndex((s) => s.id === id) + 1)).join(', ')}.`);
+      }, 'yeniden öneri istendi');
+      await enqueue('regenerate', slug, { sections: ids, brief: g.brief || '', all: !!g.regenAll });
+      toast('Kuyruğa alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rgb.disabled = false; }
+  };
   document.querySelectorAll('[data-note]').forEach((ta) => ta.onchange = () => {
     const sid = ta.dataset.note, v = ta.value;
     queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).note = v; }, `${sid} notu`);
