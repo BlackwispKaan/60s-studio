@@ -65,7 +65,8 @@ function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = '
 class GitHubStore {
   constructor(token) { this.token = token; this.demo = false; }
   async req(path, opts = {}) {
-    const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}/${path}`, {
+    // Sondaki '/' GitHub'da CORS'suz hata döndürür (tarayıcıda "Failed to fetch"), o yüzden boş path'te eklenmez.
+    const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}${path ? '/' + path : ''}`, {
       ...opts, cache: 'no-store',
       headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers || {}) },
     });
