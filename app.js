@@ -894,7 +894,7 @@ async function renderIntegrations() {
 
 /* ---------- worker durumu (Kağan'ın PC'sindeki arka plan Claude) ---------- */
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
-const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', build: 'kurgu', revise: 'düzeltme' };
+const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', build: 'kurgu', revise: 'düzeltme', refresh_media: 'meme adaylarını yenileme' };
 function jobName(j) {
   const m = /^\d{8}T\d{6}-([a-z_]+)-(.+)$/.exec(j || '');
   if (!m) return j || '';
