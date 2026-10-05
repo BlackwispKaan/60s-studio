@@ -88,6 +88,14 @@ class GitHubStore {
     const j = await this.req(`contents/${encodeURI(path)}?ref=${REPO.branch}&t=${Date.now()}`);
     return Array.isArray(j) ? j.map((x) => ({ name: x.name, type: x.type })) : [];
   }
+  // Özel repodaki ikili dosyayı (önizleme jpg/mp4/mp3) blob URL olarak döndürür.
+  async blobUrl(path) {
+    const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}/contents/${encodeURI(path)}?ref=${REPO.branch}`, {
+      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' },
+    });
+    if (!r.ok) throw new Error(`GitHub ${r.status}`);
+    return URL.createObjectURL(await r.blob());
+  }
 }
 class LocalDemoStore {
   // localhost'ta proje klasörü sunuluyorsa (site/ bir alt klasör) dosyaları okur; yazmalar sadece bellekte.
@@ -99,6 +107,7 @@ class LocalDemoStore {
     return r.ok ? { text: await r.text(), sha: 'local' } : null;
   }
   async put(path, text) { this.mem.set(path, text); return {}; }
+  async blobUrl(path) { return `../${path}`; }
   async list(path) {
     const r = await fetch(`../${path}/`, { cache: 'no-store' });
     if (!r.ok) return [];
@@ -187,15 +196,28 @@ function buildMaterials(g) {
   g.sections.forEach((s, i) => {
     (s.gameplay || []).forEach((x) => add({ id: x.id, type: 'gameplay', section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '' }));
     const o = selectedOpt(s);
-    (o?.needs || []).forEach((x, j) => add({ id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] }));
+    (o?.needs || []).forEach((x, j) => {
+      const base = { id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] };
+      if (x.candidates?.length) {
+        // Meme/sfx adaylarını Claude indirdi; ekip sadece seçer. Seçilmezse ilk aday kullanılır.
+        const c = x.candidates.find((k) => k.id === x.chosen) || x.candidates[0];
+        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen, done: true, doneBy: 'Claude' });
+        seen.add(base.file);
+      } else add(base);
+    });
   });
   return out;
+}
+function missingChoices(g) {
+  // Seçili seçeneklerde, adayı olan ama ekibin henüz seçim yapmadığı meme/sfx ihtiyaçları
+  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.candidates?.length && !n.chosen));
 }
 function narrationScript(g) {
   return g.sections.map((s, i) => `[S${i + 1} · ${s.time}] ${selectedOpt(s)?.narration || '—'}`).join('\n\n');
 }
 function materialsMarkdown(g) {
-  const mats = g.materials;
+  const mats = g.materials.filter((m) => !m.auto);
+  const autos = g.materials.filter((m) => m.auto);
   const by = (t) => mats.filter((m) => m.type === t);
   const line = (m) => `- [${m.done ? 'x' : ' '}] **${m.section}** ${m.desc}\n  - Dosya adı: \`${m.file}\`${m.source ? `\n  - Kaynak: ${m.source}` : ''}${m.search ? `\n  - Arama: "${m.search}"` : ''}${(m.refs || []).map((r) => `\n  - Örnek: [${r.label}](${r.url})`).join('')}`;
   const st = stats(g);
@@ -215,6 +237,9 @@ ${by('meme').map(line).join('\n') || '- (yok)'}
 
 ## 🔊 Ses efektleri (${by('sfx').length})
 ${by('sfx').map(line).join('\n') || '- (yok)'}
+
+## 🤖 Claude'un hazırladıkları (sizin bir şey yapmanız gerekmez) (${autos.length})
+${autos.map((m) => `- **${m.section}** ${TYPE_LABEL[m.type]}: ${m.chosenTitle}${m.chosenExplicit ? '' : ' _(seçim yapılmadı, ilk aday)_'} → \`${m.file}\``).join('\n') || '- (yok)'}
 
 ## 🎙️ Anlatıcı (ElevenLabs — Claude API ile otomatik üretir, sizin bir şey yapmanız gerekmez)
 \`\`\`
@@ -348,7 +373,32 @@ function refsHtml(refs) {
     <span class="ref-label">${esc(r.label)}</span></a>`).join('')}</div>`;
 }
 
-function optionHtml(sec, o) {
+// Claude'un indirdiği meme/sfx adayları: önizleme + "Seç" butonu
+function candidatesHtml(slug, sec, o, n) {
+  const pv = (f) => `games/${slug}/previews/${f}`;
+  return `<div class="cands">${n.candidates.map((c) => {
+    const on = n.chosen === c.id;
+    const isSfx = !!c.audio;
+    return `<div class="cand ${on ? 'chosen' : ''}" data-cand="${esc(c.id)}">
+      <button type="button" class="cand-media ${isSfx ? 'sfx' : ''}" data-play="${esc(pv(isSfx ? c.audio : c.video))}" data-kind="${isSfx ? 'sfx' : 'meme'}" title="Önizle">
+        ${isSfx ? '<span class="sfx-icon">🔊</span>' : `<img data-src="${esc(pv(c.thumb))}" alt="">`}
+        <span class="play-badge">▶</span>
+      </button>
+      <div class="cand-title">${esc(c.title)}${c.duration ? ` <span class="muted">· ${Math.round(c.duration)} sn</span>` : ''}</div>
+      <div class="cand-actions">
+        <button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}|${esc(c.id)}">${on ? '✓ Seçildi' : 'Seç'}</button>
+        <a class="small muted" href="${esc(c.page)}" target="_blank" rel="noopener">kaynak ↗</a>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function needHtml(slug, sec, o, n) {
+  const head = `<div>${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}</div>`;
+  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
+}
+
+function optionHtml(sec, o, slug) {
   const on = sec.selected === o.id;
   return `<div class="opt ${on ? 'selected' : ''}" data-sec="${esc(sec.id)}" data-opt="${esc(o.id)}" role="button" tabindex="0">
     <span class="radio"></span>
@@ -357,19 +407,19 @@ function optionHtml(sec, o) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      ${o.needs?.length ? `<dt>Ek ihtiyaç</dt><dd>${o.needs.map((n) => `<div>${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}</div>${refsHtml(n.refs)}`).join('')}</dd>` : ''}
+      ${o.needs?.length ? `<dt>Ek ihtiyaç</dt><dd>${o.needs.map((n) => needHtml(slug, sec, o, n)).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
     </dl>
   </div>`;
 }
 
-function sectionHtml(sec, i, editable, opening) {
+function sectionHtml(sec, i, editable, opening, slug) {
   return `<section class="card" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
     <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
     ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
-    <div class="options">${sec.options.map((o) => optionHtml(sec, o)).join('')}</div>
+    <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
     <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="Bu bölüm için not / kendi fikrin (opsiyonel)" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
   </section>`;
 }
@@ -386,7 +436,15 @@ function materialsHtml(g) {
       <div class="row"><input type="url" id="driveIn" style="flex:1" placeholder="https://drive.google.com/drive/folders/…" value="${esc(g.settings.mediaFolderUrl || '')}">
       ${g.settings.mediaFolderUrl ? `<a class="btn" href="${esc(g.settings.mediaFolderUrl)}" target="_blank" rel="noopener">Aç ↗</a>` : ''}</div>
     </div>
-    ${order.map((t) => mats.filter((m) => m.type === t)).filter((l) => l.length).map((list) => list.map((m) => `
+    ${order.map((t) => mats.filter((m) => m.type === t)).filter((l) => l.length).map((list) => list.map((m) => m.auto ? `
+      <div class="mat">
+        <span style="width:20px;text-align:center">🤖</span>
+        <div style="flex:1;min-width:0">
+          <div class="row" style="gap:6px"><span class="mat-type t-${esc(m.type)}">${esc(TYPE_LABEL[m.type])}</span><span class="small muted">${esc(m.section)} · Claude hazırladı</span></div>
+          <div class="mat-desc">${esc(m.chosenTitle)}${m.chosenExplicit ? '' : ' <span class="small" style="color:var(--warn)">(seçim yapılmadı, ilk aday kullanılacak)</span>'}</div>
+          <div class="small muted"><code>${esc(m.file)}</code></div>
+        </div>
+      </div>` : `
       <label class="mat ${m.done ? 'done' : ''}">
         <input type="checkbox" data-mat="${esc(m.file || m.id)}" ${m.done ? 'checked' : ''}>
         <div style="flex:1;min-width:0">
@@ -447,7 +505,7 @@ async function renderGame(slug) {
             <div class="seg" id="capSeg">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" ${editable ? '' : 'disabled'}>${c.label}</button>`).join('')}</div></div>
           <p class="small muted" id="capHint" style="margin:10px 0 0">${esc(CAPTIONS.find((c) => c.v === g.settings.captions)?.hint)}</p>
         </section>
-        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening)).join('')}` : ''}
+        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening, g.slug)).join('')}` : ''}
       ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(l.by)}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
     </div>
     ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
@@ -462,6 +520,43 @@ async function renderGame(slug) {
 }
 
 function selectionSig(g) { return g.sections.map((s) => s.selected || '-').join(''); }
+
+/* ---------- önizleme medyası (özel repodan blob olarak) ---------- */
+const blobCache = new Map();
+function blob(path) {
+  if (!blobCache.has(path)) blobCache.set(path, S.store.blobUrl(path).catch((e) => { blobCache.delete(path); throw e; }));
+  return blobCache.get(path);
+}
+function hydrateThumbs() {
+  const imgs = [...document.querySelectorAll('img[data-src]')];
+  const io = new IntersectionObserver((entries) => entries.forEach((en) => {
+    if (!en.isIntersecting) return;
+    io.unobserve(en.target);
+    blob(en.target.dataset.src).then((u) => { en.target.src = u; }).catch(() => en.target.classList.add('broken'));
+  }), { rootMargin: '400px' });
+  imgs.forEach((i) => io.observe(i));
+}
+let currentAudio = null;
+async function playPreview(el) {
+  const path = el.dataset.play;
+  if (el.dataset.kind === 'sfx') {
+    if (currentAudio) { currentAudio.pause(); if (currentAudio._el === el) { currentAudio = null; el.classList.remove('playing'); return; } currentAudio._el.classList.remove('playing'); }
+    el.classList.add('loading');
+    try {
+      const a = new Audio(await blob(path)); a._el = el; currentAudio = a;
+      a.onended = () => { el.classList.remove('playing'); currentAudio = null; };
+      el.classList.add('playing'); await a.play();
+    } catch { toast('Ses yüklenemedi', true); } finally { el.classList.remove('loading'); }
+    return;
+  }
+  el.classList.add('loading');
+  try {
+    const v = document.createElement('video');
+    v.src = await blob(path); v.controls = true; v.autoplay = true; v.playsInline = true; v.className = 'cand-video';
+    v.onclick = (ev) => ev.stopPropagation();
+    el.replaceWith(v);
+  } catch { toast('Video yüklenemedi', true); el.classList.remove('loading'); }
+}
 
 function updateFooter(g) {
   const st = stats(g);
@@ -479,7 +574,27 @@ function bindGame(g0) {
   const take = $('#takeOwner');
   if (take) take.onclick = () => { queueOp(slug, (x) => { x.owner = S.user; logLine(x, `${S.user} sorumluluğu aldı.`); }, 'sorumlu değişti'); renderGame(slug); };
 
-  document.querySelectorAll('.opt').forEach((btn) => btn.onclick = () => {
+  hydrateThumbs();
+  document.querySelectorAll('.cand-media').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
+  document.querySelectorAll('.cand-pick').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file, cid] = b.dataset.pick.split('|');
+    const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
+    const val = find(g).chosen === cid ? null : cid;
+    queueOp(slug, (x) => { find(x).chosen = val; }, `${file} → ${val || 'boş'}`);
+    const box = b.closest('.cands');
+    box.querySelectorAll('.cand').forEach((c) => {
+      const on = c.dataset.cand === val;
+      c.classList.toggle('chosen', on);
+      const pb = c.querySelector('.cand-pick'); pb.classList.toggle('btn-primary', on); pb.textContent = on ? '✓ Seçildi' : 'Seç';
+    });
+    const hint = box.previousElementSibling?.querySelector('.muted.small'); if (hint) hint.textContent = `· ${val ? '✓ seçildi' : 'birini seç'}`;
+  });
+  document.querySelectorAll('.cands a').forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
+
+  document.querySelectorAll('.opt').forEach((btn) => btn.onclick = (ev) => {
+    if (ev.target.closest('.cands, .refs')) return;
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
     const sid = btn.dataset.sec, oid = btn.dataset.opt;
     const sec = g.sections.find((s) => s.id === sid);
@@ -508,6 +623,8 @@ function bindGame(g0) {
 
   const exp = $('#exportBtn');
   if (exp) exp.onclick = async () => {
+    const miss = missingChoices(g).length;
+    if (miss && !confirm(`${miss} meme/ses efekti için seçim yapılmadı. Bunlarda ilk aday kullanılacak. Devam edilsin mi?`)) return;
     exp.disabled = true; exp.textContent = 'Hazırlanıyor…';
     try {
       await flush(slug);

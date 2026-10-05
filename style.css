@@ -192,3 +192,24 @@ details summary { cursor: pointer; font-weight: 600; }
 .ref-label { padding: 6px 8px; color: var(--text); }
 .opening { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 12px; margin-top: 12px; font-size: 14px; }
 @media (max-width: 600px) { .ref { width: calc(50% - 4px); } }
+
+/* Claude'un indirdiği meme/sfx adayları */
+.cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 8px 0 10px; }
+.cand { background: var(--bg); border: 2px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; cursor: default; }
+.cand.chosen { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cand-media { position: relative; display: block; width: 100%; aspect-ratio: 16/9; padding: 0; border: 0; background: var(--surface-2); cursor: pointer; overflow: hidden; }
+.cand-media img { width: 100%; height: 100%; object-fit: contain; display: block; background: #111; }
+.cand-media img.broken { visibility: hidden; }
+.cand-media.sfx { background: linear-gradient(135deg, #1f4a3a, #12261e); }
+.sfx-icon { font-size: 30px; display: flex; align-items: center; justify-content: center; height: 100%; }
+.play-badge { position: absolute; right: 6px; bottom: 6px; width: 28px; height: 28px; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.cand-media.playing .play-badge { background: var(--accent); color: var(--accent-ink); }
+.cand-media.playing .play-badge::after { content: "■"; }
+.cand-media.playing .play-badge { font-size: 0; }
+.cand-media.playing .play-badge::after { font-size: 12px; }
+.cand-media.loading .play-badge { animation: spin .8s linear infinite; }
+.cand-video { width: 100%; aspect-ratio: 16/9; background: #000; display: block; }
+.cand-title { font-size: 12.5px; line-height: 1.35; padding: 6px 8px 0; flex: 1; }
+.cand-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px 8px; }
+.cand-pick { padding: 4px 12px; font-size: 13px; border-radius: 8px; }
+.cand-actions a { text-decoration: none; }
