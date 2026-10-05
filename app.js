@@ -90,6 +90,11 @@ class GitHubStore {
     const j = await this.req(`contents/${encodeURI(path)}?ref=${REPO.branch}&t=${Date.now()}`);
     return Array.isArray(j) ? j.map((x) => ({ name: x.name, type: x.type })) : [];
   }
+  // Son commit'ler = ekibin ve Claude'un yaptığı her değişikliğin kaydı (etkinlik akışı için).
+  async commits(n = 60) {
+    const j = await this.req(`commits?sha=${REPO.branch}&per_page=${n}&t=${Date.now()}`);
+    return (j || []).map((c) => ({ msg: c.commit.message.split('\n')[0], at: c.commit.author.date }));
+  }
   // Özel repodaki ikili dosyayı (önizleme jpg/mp4/mp3) blob URL olarak döndürür.
   async blobUrl(path) {
     const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}/contents/${encodeURI(path)}?ref=${REPO.branch}`, {
@@ -112,6 +117,11 @@ class LocalDemoStore {
   }
   async put(path, text) { this.mem.set(path, text); return {}; }
   async blobUrl(path) { return `../${path}`; }
+  async commits() {
+    // Demo: commit yok, oyunların log kayıtlarından üret
+    return [...S.games.values()].flatMap((g) => (g.log || []).map((l) => ({ msg: `[${l.by}] ${g.title}: ${l.msg}`, at: l.at })))
+      .sort((a, b) => b.at.localeCompare(a.at));
+  }
   async list(path) {
     const r = await fetch(`../${path}/`, { cache: 'no-store' });
     if (!r.ok) return [];
@@ -328,7 +338,15 @@ async function renderHome() {
   const all = [...S.games.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const archivedCount = all.filter((g) => g.archived).length;
   const games = all.filter((g) => S.showArchived || !g.archived);
+  app.classList.add('wide');
   app.innerHTML = `
+    <div class="home-layout">
+    <aside class="activity-panel">
+      <div class="row"><h2>🕘 Son etkinlikler</h2><span class="spacer"></span>
+        <label class="small muted" title="Claude'un sistem/site güncellemelerini de göster"><input type="checkbox" id="sysAct" ${S.showSystemActivity ? 'checked' : ''}> sistem</label></div>
+      <div id="activity" class="activity"><span class="spinner"></span></div>
+    </aside>
+    <div class="home-main">
     <div class="hero">
       <h1>60 saniyede oyunlar</h1>
       <p class="muted" style="margin:0">Yeni bir oyun yaz. Claude araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
@@ -354,6 +372,7 @@ async function renderHome() {
         <div class="row small muted"><span>${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</span><span class="spacer"></span><span>👥 ${esc(owners(g).join(', '))}</span></div>
       </div>`;
     }).join('')}</div>` : '<div class="card empty muted">Henüz oyun yok.</div>'}
+    </div></div>
   `;
   document.querySelectorAll('[data-open]').forEach((c) => {
     c.onclick = (e) => { if (!e.target.closest('a,button')) location.hash = `#/game/${c.dataset.open}`; };
@@ -362,6 +381,8 @@ async function renderHome() {
   document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
   const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
   renderTaskList();
+  renderActivity();
+  $('#sysAct').onchange = (e) => { S.showSystemActivity = e.target.checked; renderActivity(); };
   $('#newGame').onsubmit = async (e) => {
     e.preventDefault();
     const title = $('#newGameName').value.trim();
@@ -959,11 +980,70 @@ async function renderTaskList() {
     : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, Claude yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace('Son is bitti', 'Son biten iş')) : ''}</p>`}`;
 }
 
+/* ---------- etkinlik akışı (sol panel) ---------- */
+function humanizeAction(t) {
+  return t.split(', ').map((p) => {
+    let m;
+    if ((m = /^s(\d+) → ([a-z]+)$/i.exec(p))) return `S${m[1]} için ${m[2].toUpperCase()} seçeneğini seçti`;
+    if ((m = /^s(\d+) → boş$/i.exec(p))) return `S${m[1]} seçimini kaldırdı`;
+    if ((m = /^(S\d+)_\w+\.\w+ → (boş|custom|\w+)$/.exec(p))) return m[2] === 'boş' ? `${m[1]} meme/ses seçimini kaldırdı` : m[2] === 'custom' ? `${m[1]} için kendi linkini seçti` : `${m[1]} için meme/ses adayı seçti`;
+    if ((m = /^(S\d+)_\w+\.\w+ kendi linki$/.exec(p))) return `${m[1]} için kendi linkini girdi`;
+    if ((m = /^s(\d+) notu$/i.exec(p))) return `S${m[1]} notunu yazdı`;
+    if ((m = /^s(\d+) yeniden öner: (evet|hayır)$/i.exec(p))) return m[2] === 'evet' ? `S${m[1]} bölümünü yeniden öneri için işaretledi` : `S${m[1]} yeniden öneri işaretini kaldırdı`;
+    if ((m = /^materyal (✓|✗) (.+)$/.exec(p))) return `${m[2]} materyalini ${m[1] === '✓' ? 'tamamladı' : 'geri aldı'}`;
+    if ((m = /^altyazı: (\w+)$/.exec(p))) return `altyazıyı "${(CAPTIONS.find((c) => c.v === m[1]) || {}).label || m[1]}" yaptı`;
+    return p;
+  }).join(', ');
+}
+function parseActivity(c) {
+  const m = /^\[([^\]]+)\]\s*(.*)$/.exec(c.msg);
+  if (!m) return { who: 'Claude', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
+  const who = m[1], rest = m[2];
+  if (who === 'Worker') return null; // durum kalp atışları akışı kirletmesin
+  if (/^iş kuyruğu: /.test(rest)) {
+    const [, type, slug] = /^iş kuyruğu: (\S+) (\S+)/.exec(rest) || [];
+    return { who, icon: '📥', text: `${S.games.get(slug)?.title || slug} için ${JOB_LABEL[type] || type} işini kuyruğa ekledi`, game: slug, at: c.at };
+  }
+  const ng = /^Yeni oyun: (.+)$/.exec(rest);
+  if (ng) { const sl = slugify(ng[1]); return { who, icon: '🆕', text: 'yeni oyun ekledi', title: S.games.get(sl)?.title || ng[1], game: S.games.has(sl) ? sl : null, at: c.at }; }
+  const g = /^([^:]+): (.*)$/.exec(rest);
+  if (!g) return { who, icon: who === 'Claude' ? '🤖' : '✏️', text: rest, game: null, at: c.at };
+  const raw = g[1].trim(), found = [...S.games.values()].find((x) => x.title === raw || x.slug === raw.toLowerCase());
+  const slug = found?.slug || null, title = found?.title || raw;
+  const icon = who === 'Claude' ? '🤖' : /çıktı|başlatıldı|onaylandı|düzeltme/i.test(g[2]) ? '🚦' : '✏️';
+  return { who, icon, text: humanizeAction(g[2]), title, game: slug, at: c.at };
+}
+async function renderActivity() {
+  const box = $('#activity'); if (!box) return;
+  let items = [];
+  try { items = (await S.store.commits(80)).map(parseActivity).filter(Boolean); } catch (e) { box.innerHTML = `<p class="small muted">Geçmiş yüklenemedi.</p>`; return; }
+  // Aynı kişi + aynı oyun, 15 dk içindeki ardışık değişiklikleri tek satırda topla
+  const grouped = [];
+  for (const it of items) {
+    const last = grouped[grouped.length - 1];
+    if (last && !it.system && last.who === it.who && last.game === it.game && last.title === it.title &&
+        Math.abs(new Date(last.at) - new Date(it.at)) < 15 * 60000 && last.texts.length < 6) { last.texts.push(it.text); continue; }
+    grouped.push({ ...it, texts: [it.text] });
+  }
+  const showSystem = S.showSystemActivity;
+  const rows = grouped.filter((g) => showSystem || !g.system).slice(0, 40);
+  box.innerHTML = rows.length ? rows.map((g) => `
+    <div class="act">
+      <span class="act-icon">${g.icon}</span>
+      <div style="min-width:0">
+        <div><b>${esc(g.who)}</b>${g.title ? ` · ${g.game ? `<a href="#/game/${encodeURIComponent(g.game)}">${esc(g.title)}</a>` : esc(g.title)}` : ''}</div>
+        <div class="act-text">${[...new Set(g.texts)].map(esc).join('<br>')}</div>
+        <div class="small muted">${sinceText(g.at)} önce · ${fmtDate(g.at)}</div>
+      </div>
+    </div>`).join('') : '<p class="small muted">Henüz etkinlik yok.</p>';
+}
+
 /* ---------- router / boot ---------- */
 async function route() {
   if (!S.user) { $('#app').innerHTML = `<div class="card empty"><h2>Önce sağ üstten ismini seç 👆</h2></div>`; return; }
   const h = location.hash.replace(/^#/, '') || '/';
   const m = h.match(/^\/game\/(.+)$/);
+  $('#app').classList.remove('wide');
   loadWorkerStatus();
   try {
     if (m) await renderGame(decodeURIComponent(m[1]));

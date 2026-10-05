@@ -252,3 +252,19 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .task-n { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex: none; }
 .task.run .task-n { background: var(--good); color: #0b2a1c; }
 .task a { text-decoration: none; color: var(--accent); white-space: nowrap; }
+
+/* Ana sayfa: sol etkinlik paneli */
+.container.wide { max-width: 1240px; }
+.home-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
+.activity-panel { position: sticky; top: 72px; max-height: calc(100vh - 90px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.activity-panel h2 { font-size: 16px; }
+.activity { margin-top: 10px; display: flex; flex-direction: column; }
+.act { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; line-height: 1.4; }
+.act:first-child { border-top: 0; }
+.act-icon { width: 24px; flex: none; text-align: center; }
+.act a { color: var(--accent); text-decoration: none; }
+.act-text { color: var(--text); margin: 2px 0; word-break: break-word; }
+@media (max-width: 900px) {
+  .home-layout { grid-template-columns: 1fr; }
+  .activity-panel { position: static; max-height: 420px; order: 2; }
+}
