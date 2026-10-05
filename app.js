@@ -257,15 +257,20 @@ function settingsModal(firstRun = false) {
       <p id="tokMsg" class="small"></p>
     </div>`);
   $('#tokSave').onclick = async () => {
-    const v = $('#tokIn').value.trim();
+    const v = $('#tokIn').value.replace(/s+/g, '');
     if (!v) return;
     $('#tokMsg').textContent = 'Bağlanılıyor…';
     try {
       const st = new GitHubStore(v);
       const r = await st.ping();
-      if (!r) throw new Error('Repo bulunamadı. Collaborator olarak eklendin mi?');
+      if (!r) throw new Error('Token geçerli ama Youtube reposunu göremiyor. Token oluştururken Repository access → "Only select repositories" → BlackwispKaan/Youtube seçilmeli (Samet/Yiğit: davet kabul edilmiş olmalı).');
       ls.set('studio.token', v); S.store = st; closeModal(); toast('Bağlandı ✓'); await boot();
-    } catch (e) { $('#tokMsg').innerHTML = `<span style="color:var(--bad)">Bağlanamadı: ${esc(e.message)}</span>`; }
+    } catch (e) {
+      const why = e.status === 401 ? 'GitHub bu token\'ı tanımıyor (geçersiz, silinmiş veya eksik kopyalanmış). "Regenerate" yaptıysan eski token artık çalışmaz; en son oluşan kodu kullan.'
+        : e.status === 403 ? 'Token\'ın bu repoya yetkisi yok. Repository access → Youtube ve Contents: Read and write seçili mi?'
+        : e.message;
+      $('#tokMsg').innerHTML = `<span style="color:var(--bad)">Bağlanamadı: ${esc(why)}</span><br><span class="muted">Token uzunluğu: ${v.length} karakter (fine-grained token ~93 karakterdir, "github_pat_" ile başlar)</span>`;
+    }
   };
   const c = $('#tokClear'); if (c) c.onclick = () => { ls.del('studio.token'); location.reload(); };
   $('#themeBtn').onclick = () => { const t = ls.get('studio.theme', 'dark') === 'dark' ? 'light' : 'dark'; ls.set('studio.theme', t); applyTheme(); settingsModal(); };
