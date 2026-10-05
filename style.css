@@ -213,3 +213,20 @@ details summary { cursor: pointer; font-weight: 600; }
 .cand-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px 8px; }
 .cand-pick { padding: 4px 12px; font-size: 13px; border-radius: 8px; }
 .cand-actions a { text-decoration: none; }
+
+/* Drive bağlantıları, proje düzenleme, kendi linkim kartı */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.icon-btn[hidden] { display: none; }
+.icon-btn.sm { width: 30px; height: 30px; font-size: 15px; }
+.drive-link { gap: 6px; }
+.drive-link svg { flex: none; }
+.game-card { cursor: pointer; }
+.game-card.archived { opacity: .55; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+.chip input { accent-color: var(--accent); }
+.custom-media { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: default; background: repeating-linear-gradient(135deg, var(--surface-2) 0 10px, var(--surface) 10px 20px); }
+.custom-media span { font-size: 22px; }
+.custom-media small { color: var(--muted); font-size: 11px; }
+.custom-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 0; }
+.custom-form input { font-size: 12.5px; padding: 6px 8px; }
+input[type=range] { accent-color: var(--accent); width: 100%; }

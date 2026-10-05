@@ -202,8 +202,13 @@ function buildMaterials(g) {
       const base = { id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] };
       if (x.candidates?.length) {
         // Meme/sfx adaylarını Claude indirdi; ekip sadece seçer. Seçilmezse ilk aday kullanılır.
+        if (x.chosen === 'custom' && x.custom?.url) {
+          out.push({ ...base, auto: true, chosen: 'custom', chosenTitle: `Kendi linki: ${x.custom.url}${x.custom.note ? ` (${x.custom.note})` : ''}`, customUrl: x.custom.url, chosenExplicit: true, done: true, doneBy: 'Claude' });
+          seen.add(base.file);
+          return;
+        }
         const c = x.candidates.find((k) => k.id === x.chosen) || x.candidates[0];
-        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen, done: true, doneBy: 'Claude' });
+        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen && x.chosen !== 'custom', done: true, doneBy: 'Claude' });
         seen.add(base.file);
       } else add(base);
     });
@@ -212,7 +217,7 @@ function buildMaterials(g) {
 }
 function missingChoices(g) {
   // Seçili seçeneklerde, adayı olan ama ekibin henüz seçim yapmadığı meme/sfx ihtiyaçları
-  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.candidates?.length && !n.chosen));
+  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.candidates?.length && (!n.chosen || (n.chosen === 'custom' && !n.custom?.url))));
 }
 function narrationScript(g) {
   return g.sections.map((s, i) => `[S${i + 1} · ${s.time}] ${selectedOpt(s)?.narration || '—'}`).join('\n\n');
@@ -318,7 +323,9 @@ async function renderHome() {
   const app = $('#app');
   app.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
   await loadGames();
-  const games = [...S.games.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const all = [...S.games.values()].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const archivedCount = all.filter((g) => g.archived).length;
+  const games = all.filter((g) => S.showArchived || !g.archived);
   app.innerHTML = `
     <div class="hero">
       <h1>60 saniyede oyunlar</h1>
@@ -329,18 +336,27 @@ async function renderHome() {
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
       <button class="btn btn-primary" type="submit">+ Yeni oyun</button>
     </form>
-    <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span></div>
+    <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span><span class="spacer"></span>
+      ${archivedCount ? `<button class="btn btn-ghost small" id="toggleArchive">${S.showArchived ? 'Arşivi gizle' : `Arşiv (${archivedCount})`}</button>` : ''}</div>
     ${games.length ? `<div class="game-grid">${games.map((g) => {
       const st = STATUS[g.status]?.step ?? 0;
       const s = stats(g);
-      return `<a class="card game-card" href="#/game/${encodeURIComponent(g.slug)}">
-        <div class="row">${statusPill(g)}<span class="spacer"></span><span class="small muted">${esc(g.owner)}</span></div>
+      return `<div class="card game-card ${g.archived ? 'archived' : ''}" data-open="${esc(g.slug)}" role="link" tabindex="0">
+        <div class="row">${statusPill(g)}<span class="spacer"></span>
+          ${driveLink(g, 'icon-btn sm')}
+          <button class="icon-btn sm" data-edit="${esc(g.slug)}" title="Projeyi düzenle" aria-label="Projeyi düzenle">⋯</button></div>
         <h3>${esc(g.title)}</h3>
         <div class="progress"><span style="width:${Math.round((st / 5) * 100)}%"></span></div>
-        <div class="small muted">${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</div>
-      </a>`;
+        <div class="row small muted"><span>${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</span><span class="spacer"></span><span>👥 ${esc(owners(g).join(', '))}</span></div>
+      </div>`;
     }).join('')}</div>` : '<div class="card empty muted">Henüz oyun yok.</div>'}
   `;
+  document.querySelectorAll('[data-open]').forEach((c) => {
+    c.onclick = (e) => { if (!e.target.closest('a,button')) location.hash = `#/game/${c.dataset.open}`; };
+    c.onkeydown = (e) => { if (e.key === 'Enter') location.hash = `#/game/${c.dataset.open}`; };
+  });
+  document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
+  const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
   $('#newGame').onsubmit = async (e) => {
     e.preventDefault();
     const title = $('#newGameName').value.trim();
@@ -350,7 +366,7 @@ async function renderHome() {
     const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Oluşturuluyor…';
     try {
       const g = {
-        schema: 1, slug, title, owner: S.user, createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
+        schema: 1, slug, title, owner: S.user, owners: [S.user], createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
         settings: { captions: 'full', mediaFolderUrl: '' }, summary: '', sections: [], materials: [], versions: [], revisions: [],
         log: [{ at: nowIso(), by: S.user, msg: 'Oyun eklendi, araştırma kuyruğa alındı.' }],
       };
@@ -359,6 +375,45 @@ async function renderHome() {
       S.games.set(slug, g);
       location.hash = `#/game/${slug}`;
     } catch (err) { toast('Oluşturulamadı: ' + err.message, true); btn.disabled = false; btn.textContent = '+ Yeni oyun'; }
+  };
+}
+
+const owners = (g) => (g.owners?.length ? g.owners : g.owner ? [g.owner] : []);
+const DRIVE_SVG = '<svg viewBox="0 0 87.3 78" width="16" height="16" aria-hidden="true"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
+function driveLink(g, cls = 'btn') {
+  const url = g?.settings?.mediaFolderUrl;
+  if (!url) return '';
+  return `<a class="${cls} drive-link" href="${esc(url)}" target="_blank" rel="noopener" title="Drive klasörünü aç" aria-label="Drive klasörünü aç" onclick="event.stopPropagation()">${DRIVE_SVG}${cls === 'btn' ? '<span>Drive</span>' : ''}</a>`;
+}
+
+function editGameModal(slug) {
+  const g = S.games.get(slug);
+  const cur = owners(g);
+  openModal(`
+    <h2 style="margin-bottom:14px">Projeyi düzenle</h2>
+    <div class="stack">
+      <div class="field"><label for="egTitle">Oyun adı</label><input type="text" id="egTitle" value="${esc(g.title)}" maxlength="60"></div>
+      <div class="field"><label>Çalışanlar</label>
+        <div class="row">${S.members.map((m) => `<label class="chip"><input type="checkbox" value="${esc(m)}" ${cur.includes(m) ? 'checked' : ''}> ${esc(m)}</label>`).join('')}</div></div>
+      <div class="field"><label for="egDrive">Drive klasör linki</label><input type="url" id="egDrive" value="${esc(g.settings?.mediaFolderUrl || '')}" placeholder="https://drive.google.com/drive/folders/…"></div>
+      <label class="chip"><input type="checkbox" id="egArchived" ${g.archived ? 'checked' : ''}> Arşivle (ana sayfada gizlenir)</label>
+      <div class="row"><button class="btn btn-primary" id="egSave">Kaydet</button><button class="btn btn-ghost" id="egCancel">Vazgeç</button></div>
+    </div>`);
+  $('#egCancel').onclick = closeModal;
+  $('#egSave').onclick = async () => {
+    const title = $('#egTitle').value.trim() || g.title;
+    const os = [...document.querySelectorAll('#modalBody .chip input[type=checkbox][value]')].filter((c) => c.checked).map((c) => c.value);
+    if (!os.length) return toast('En az bir çalışan seçin', true);
+    const drive = $('#egDrive').value.trim(), archived = $('#egArchived').checked;
+    $('#egSave').disabled = true;
+    try {
+      await mutateGame(slug, (x) => {
+        x.title = title; x.owners = os; x.owner = os[0]; x.archived = archived;
+        x.settings = { ...(x.settings || {}), mediaFolderUrl: drive };
+        logLine(x, `Proje düzenlendi: çalışanlar ${os.join(', ')}${archived ? ', arşivlendi' : ''}.`);
+      }, 'proje düzenlendi');
+      closeModal(); toast('Kaydedildi ✓'); route();
+    } catch (e) { toast('Kaydedilemedi: ' + e.message, true); $('#egSave').disabled = false; }
   };
 }
 
@@ -392,7 +447,19 @@ function candidatesHtml(slug, sec, o, n) {
         <a class="small muted" href="${esc(c.page)}" target="_blank" rel="noopener">kaynak ↗</a>
       </div>
     </div>`;
-  }).join('')}</div>`;
+  }).join('')}${customCandHtml(sec, o, n)}</div>`;
+}
+function customCandHtml(sec, o, n) {
+  const on = n.chosen === 'custom';
+  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
+  return `<div class="cand custom ${on ? 'chosen' : ''}" data-cand="custom">
+    <div class="cand-media custom-media"><span>✍️</span><b>Hiçbiri</b><small>kendi linkimi vereceğim</small></div>
+    <div class="custom-form" ${on ? '' : 'hidden'}>
+      <input type="url" class="custom-url" data-custom="${key}" placeholder="YouTube / TikTok / Tenor / myinstants linki" value="${esc(n.custom?.url || '')}">
+      <input type="text" class="custom-note" data-custom-note="${key}" placeholder="Not (ör. 0:12–0:15 arası)" value="${esc(n.custom?.note || '')}">
+    </div>
+    <div class="cand-actions"><button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${key}|custom">${on ? '✓ Seçildi' : 'Seç'}</button></div>
+  </div>`;
 }
 
 function needHtml(slug, sec, o, n) {
@@ -433,10 +500,8 @@ function materialsHtml(g) {
   return `<section class="card" id="materials">
     <div class="row"><h2>📦 Materyaller</h2><span class="pill">${done}/${mats.length}</span><span class="spacer"></span>
       <button class="btn btn-ghost" id="showExport">Listeyi göster / indir</button></div>
-    <div class="field" style="margin:14px 0">
-      <label for="driveIn">Google Drive klasör linki</label>
-      <div class="row"><input type="url" id="driveIn" style="flex:1" placeholder="https://drive.google.com/drive/folders/…" value="${esc(g.settings.mediaFolderUrl || '')}">
-      ${g.settings.mediaFolderUrl ? `<a class="btn" href="${esc(g.settings.mediaFolderUrl)}" target="_blank" rel="noopener">Aç ↗</a>` : ''}</div>
+    <div class="row small muted" style="margin:12px 0">
+      ${g.settings.mediaFolderUrl ? `<span>Oyun görüntülerini bu klasöre, listedeki dosya adlarıyla yükleyin:</span>${driveLink(g)}` : '<span>Drive klasörü henüz bağlı değil, ⋯ Düzenle\'den ekleyin.</span>'}
     </div>
     ${order.map((t) => mats.filter((m) => m.type === t)).filter((l) => l.length).map((list) => list.map((m) => m.auto ? `
       <div class="mat">
@@ -487,10 +552,11 @@ async function renderGame(slug) {
   const stale = g.status === 'collecting' && g.exportSig && g.exportSig !== selectionSig(g);
   app.innerHTML = `
     <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
-    <div class="row" style="margin-top:8px"><h1>${esc(g.title)}</h1><span class="spacer"></span>${statusPill(g)}</div>
+    <div class="row" style="margin-top:8px"><h1>${esc(g.title)}</h1><span class="spacer"></span>${driveLink(g)}${statusPill(g)}</div>
     <div class="row small muted" style="margin-top:4px">
-      <span>Sorumlu: <b style="color:var(--text)">${esc(g.owner)}</b></span>
-      ${g.owner !== S.user ? `<button class="btn btn-ghost small" id="takeOwner" style="padding:3px 10px">Bende olsun</button>` : ''}
+      <span>👥 Çalışanlar: <b style="color:var(--text)">${esc(owners(g).join(', '))}</b></span>
+      ${!owners(g).includes(S.user) ? `<button class="btn btn-ghost small" id="takeOwner" style="padding:3px 10px">Ben de katılayım</button>` : ''}
+      <button class="btn btn-ghost small" id="editGame" style="padding:3px 10px">⋯ Düzenle</button>
       <span class="spacer"></span><span id="saveState"></span>
     </div>
     ${pipelineHtml(g)}
@@ -574,10 +640,11 @@ function bindGame(g0) {
   const g = new Proxy({}, { get: (_, k) => cur()[k] });
   const editable = ['choosing', 'collecting'].includes(g.status);
   const take = $('#takeOwner');
-  if (take) take.onclick = () => { queueOp(slug, (x) => { x.owner = S.user; logLine(x, `${S.user} sorumluluğu aldı.`); }, 'sorumlu değişti'); renderGame(slug); };
+  if (take) take.onclick = () => { queueOp(slug, (x) => { x.owners = [...new Set([...owners(x), S.user])]; x.owner = x.owners[0]; logLine(x, `${S.user} projeye katıldı.`); }, 'çalışan eklendi'); renderGame(slug); };
+  $('#editGame').onclick = () => editGameModal(slug);
 
   hydrateThumbs();
-  document.querySelectorAll('.cand-media').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
+  document.querySelectorAll('.cand-media[data-play]').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
   document.querySelectorAll('.cand-pick').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
@@ -592,6 +659,16 @@ function bindGame(g0) {
       const pb = c.querySelector('.cand-pick'); pb.classList.toggle('btn-primary', on); pb.textContent = on ? '✓ Seçildi' : 'Seç';
     });
     const hint = box.previousElementSibling?.querySelector('.muted.small'); if (hint) hint.textContent = `· ${val ? '✓ seçildi' : 'birini seç'}`;
+    const form = box.querySelector('.custom-form'); if (form) { form.hidden = val !== 'custom'; if (val === 'custom') form.querySelector('input').focus(); }
+  });
+  document.querySelectorAll('.custom-form input').forEach((inp) => {
+    inp.onclick = (ev) => ev.stopPropagation();
+    inp.onchange = () => {
+      const [sid, oid, file] = (inp.dataset.custom || inp.dataset.customNote).split('|');
+      const form = inp.closest('.custom-form');
+      const url = form.querySelector('.custom-url').value.trim(), note = form.querySelector('.custom-note').value.trim(), who = S.user;
+      queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file).custom = { url, note, by: who }; }, `${file} kendi linki`);
+    };
   });
   document.querySelectorAll('.cands a').forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
 
@@ -695,6 +772,70 @@ function exportModal(g) {
   };
 }
 
+/* ---------- entegrasyonlar (API anahtarları şifreli saklanır) ---------- */
+const ELEVEN_MODELS = [
+  ['eleven_multilingual_v2', 'Multilingual v2 (en doğal, önerilen)'],
+  ['eleven_v3', 'Eleven v3 (en duygusal, alpha)'],
+  ['eleven_turbo_v2_5', 'Turbo v2.5 (yarı kredi, hızlı)'],
+  ['eleven_flash_v2_5', 'Flash v2.5 (yarı kredi, en hızlı)'],
+];
+async function encryptForWorker(plain) {
+  const pk = (await readJSON('config/worker_pubkey.json'))?.data;
+  if (!pk) throw new Error('Worker açık anahtarı bulunamadı');
+  const key = await crypto.subtle.importKey('jwk', pk.jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, new TextEncoder().encode(plain)));
+  let bin = ''; ct.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin);
+}
+async function renderIntegrations() {
+  const app = $('#app');
+  app.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+  const cur = await readJSON('config/integrations.json');
+  const el = cur?.data?.elevenlabs || {};
+  const num = (id, label, v, min, max, step, hint) => `<div class="field"><label for="${id}">${label} <span class="muted small" id="${id}V">${v}</span></label>
+    <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}"><span class="small muted">${hint}</span></div>`;
+  app.innerHTML = `
+    <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
+    <h1 style="margin:8px 0 6px">Entegrasyonlar</h1>
+    <p class="muted" style="margin:0 0 20px">API anahtarları tarayıcıda şifrelenir; sadece Kağan'ın bilgisayarındaki Claude çözebilir. Kaydedilen anahtar burada bir daha gösterilmez, sadece değiştirilebilir.</p>
+    <section class="card stack">
+      <div class="row"><h2>🎙️ ElevenLabs</h2><span class="spacer"></span>
+        <span class="pill dot ${el.apiKeyEnc ? 'st-done' : 'st-queued_edit'}">${el.apiKeyEnc ? `Anahtar ayarlı · ${esc(el.apiKeySetBy)} · ${fmtDate(el.apiKeySetAt)}` : 'Anahtar yok'}</span></div>
+      <div class="field"><label for="elKey">API anahtarı ${el.apiKeyEnc ? '(değiştirmek için yeni anahtarı yaz)' : ''}</label>
+        <input type="password" id="elKey" autocomplete="off" placeholder="${el.apiKeyEnc ? '•••••••• (kayıtlı)' : 'sk_…'}">
+        <span class="small muted">ElevenLabs → sol alt <b>Developers</b> → <b>API Keys</b> → Create. İzinlerde Text to Speech ve Voices açık olsun.</span></div>
+      <div class="field"><label for="elVoice">Ses kimliği (Voice ID)</label>
+        <input type="text" id="elVoice" value="${esc(el.voiceId || '')}" placeholder="örn. 21m00Tcm4TlvDq8ikWAM">
+        <span class="small muted">ElevenLabs → Voices → anlatıcı sesinin yanındaki ⋯ → <b>Copy voice ID</b>.</span></div>
+      <div class="field"><label for="elModel">Model</label>
+        <select id="elModel">${ELEVEN_MODELS.map(([v, l]) => `<option value="${v}" ${el.modelId === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      ${num('elStab', 'Stabilite', el.stability ?? 0.45, 0, 1, 0.05, 'Düşük = daha duygulu/değişken, yüksek = daha düz ve tutarlı.')}
+      ${num('elSim', 'Benzerlik', el.similarity ?? 0.8, 0, 1, 0.05, 'Orijinal sese ne kadar sadık kalsın.')}
+      ${num('elStyle', 'Stil abartısı', el.style ?? 0.2, 0, 1, 0.05, 'Yükseldikçe daha "oyunculu" okur (deadpan için düşük tutun).')}
+      ${num('elSpeed', 'Hız', el.speed ?? 1.0, 0.7, 1.2, 0.05, '60 saniyeye sığdırmak için 1.0–1.1 iyi çalışır.')}
+      <div class="row"><button class="btn btn-primary" id="elSave">Kaydet</button><span id="elMsg" class="small"></span></div>
+    </section>`;
+  ['elStab', 'elSim', 'elStyle', 'elSpeed'].forEach((id) => { const r = $('#' + id); r.oninput = () => ($('#' + id + 'V').textContent = r.value); });
+  $('#elSave').onclick = async () => {
+    const btn = $('#elSave'); btn.disabled = true; $('#elMsg').textContent = 'Kaydediliyor…';
+    try {
+      const keyPlain = $('#elKey').value.replace(/\s+/g, '');
+      const enc = keyPlain ? await encryptForWorker(keyPlain) : null;
+      for (let i = 0; i < 3; i++) {
+        const f = await readJSON('config/integrations.json');
+        const data = f?.data || {};
+        const e = (data.elevenlabs = { ...(data.elevenlabs || {}) });
+        e.voiceId = $('#elVoice').value.trim(); e.modelId = $('#elModel').value;
+        e.stability = +$('#elStab').value; e.similarity = +$('#elSim').value; e.style = +$('#elStyle').value; e.speed = +$('#elSpeed').value;
+        if (enc) { e.apiKeyEnc = enc; e.apiKeySetBy = S.user; e.apiKeySetAt = nowIso(); }
+        try { await S.store.put('config/integrations.json', JSON.stringify(data, null, 2) + '\n', `[${S.user}] ElevenLabs ayarları${enc ? ' (anahtar güncellendi)' : ''}`, f?.sha); break; }
+        catch (err) { if (!(err.status === 409 || err.status === 422) || i === 2) throw err; }
+      }
+      toast('Kaydedildi ✓'); renderIntegrations();
+    } catch (err) { $('#elMsg').innerHTML = `<span style="color:var(--bad)">Kaydedilemedi: ${esc(err.message)}</span>`; btn.disabled = false; }
+  };
+}
+
 /* ---------- router / boot ---------- */
 async function route() {
   if (!S.user) { $('#app').innerHTML = `<div class="card empty"><h2>Önce sağ üstten ismini seç 👆</h2></div>`; return; }
@@ -702,6 +843,7 @@ async function route() {
   const m = h.match(/^\/game\/(.+)$/);
   try {
     if (m) await renderGame(decodeURIComponent(m[1]));
+    else if (h === '/integrations') await renderIntegrations();
     else await renderHome();
   } catch (e) {
     console.error(e);
@@ -710,6 +852,10 @@ async function route() {
 }
 async function boot() {
   try { const t = await readJSON('team.json'); if (t?.data?.members?.length) S.members = t.data.members; } catch {}
+  try {
+    const c = await readJSON('config/studio.json'); S.config = c?.data || {};
+    const a = $('#driveRoot'); if (a && S.config.driveRootUrl) { a.href = S.config.driveRootUrl; a.innerHTML = DRIVE_SVG; a.hidden = false; }
+  } catch {}
   if (S.user && !S.members.includes(S.user)) S.user = null;
   renderUserSelect();
   await route();
