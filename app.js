@@ -245,6 +245,7 @@ function settingsModal(firstRun = false) {
             <li><b>Kağan:</b> Fine-grained token → Repository access: <i>Only select repositories → Youtube</i> → Permissions: <b>Contents: Read and write</b>.</li>
             <li><b>Samet / Yiğit:</b> Tokens (classic) → scope olarak sadece <b>repo</b> işaretle. (Önce Kağan'ın seni Youtube reposuna collaborator olarak eklemesi gerekir.)</li>
             <li>Süreyi 1 yıl seç, oluşan token'ı buraya yapıştır.</li>
+            <li>⚠️ GitHub'ın 📋 kopyala butonu bazen yanlış/eski kodu kopyalıyor. Kodu <b>fareyle seçip Ctrl+C</b> ile kopyala.</li>
           </ol>
         </details>
       </div>
