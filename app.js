@@ -117,7 +117,7 @@ class LocalDemoStore {
     if (!r.ok) return [];
     const html = await r.text();
     const names = [...html.matchAll(/href="([^"?#]+)"/g)].map((m) => decodeURIComponent(m[1]));
-    const fromMem = [...this.mem.keys()].filter((k) => k.startsWith(path + '/')).map((k) => k.slice(path.length + 1).split('/')[0] + '/');
+    const fromMem = [...this.mem.keys()].filter((k) => k.startsWith(path + '/')).map((k) => { const rest = k.slice(path.length + 1); return rest.includes('/') ? rest.split('/')[0] + '/' : rest; });
     return [...new Set([...names, ...fromMem])].filter((n) => !n.startsWith('.') && !n.startsWith('/'))
       .map((n) => ({ name: n.replace(/\/$/, ''), type: n.endsWith('/') ? 'dir' : 'file' }));
   }
@@ -339,6 +339,7 @@ async function renderHome() {
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
       <button class="btn btn-primary" type="submit">+ Yeni oyun</button>
     </form>
+    <section class="card tasks" id="taskList"><div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
     <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span><span class="spacer"></span>
       ${archivedCount ? `<button class="btn btn-ghost small" id="toggleArchive">${S.showArchived ? 'Arşivi gizle' : `Arşiv (${archivedCount})`}</button>` : ''}</div>
     ${games.length ? `<div class="game-grid">${games.map((g) => {
@@ -360,6 +361,7 @@ async function renderHome() {
   });
   document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
   const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
+  renderTaskList();
   $('#newGame').onsubmit = async (e) => {
     e.preventDefault();
     const title = $('#newGameName').value.trim();
@@ -442,6 +444,7 @@ function candidatesHtml(slug, sec, o, n) {
     return `<div class="cand ${on ? 'chosen' : ''}" data-cand="${esc(c.id)}">
       <button type="button" class="cand-media ${isSfx ? 'sfx' : ''}" data-play="${esc(pv(isSfx ? c.audio : c.video))}" data-kind="${isSfx ? 'sfx' : 'meme'}" title="Önizle">
         ${isSfx ? '<span class="sfx-icon">🔊</span>' : `<img data-src="${esc(pv(c.thumb))}" alt="">`}
+        ${c.style ? `<span class="style-badge ${c.style}">${c.style === 'green' ? 'Green screen' : 'Tam video'}${c.vertical ? ' · dikey' : ''}</span>` : ''}
         <span class="play-badge">▶</span>
       </button>
       <div class="cand-title">${esc(c.title)}${c.duration ? ` <span class="muted">· ${Math.round(c.duration)} sn</span>` : ''}</div>
@@ -921,6 +924,39 @@ async function loadWorkerStatus() {
 function workerBanner() {
   const v = workerView(S.worker);
   return v?.banner || v?.cls === 'warn' ? `<div class="card worker-banner ${v.cls}">${esc(v.short)}: ${esc(v.long)}</div>` : '';
+}
+
+/* ---------- iş listesi (kuyruk + worker durumu) ---------- */
+const sinceText = (iso) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? 'az önce' : m < 60 ? `${m} dk` : m < 1440 ? `${Math.floor(m / 60)} sa ${m % 60} dk` : `${Math.floor(m / 1440)} gün`;
+};
+async function renderTaskList() {
+  const box = $('#taskList'); if (!box) return;
+  let jobs = [];
+  try {
+    const files = (await S.store.list('queue')).filter((f) => f.type === 'file' && f.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name));
+    jobs = await Promise.all(files.map(async (f) => ({ name: f.name.replace(/\.json$/, ''), ...((await readJSON(`queue/${f.name}`))?.data || {}) })));
+  } catch {}
+  const w = S.worker;
+  const running = w?.state === 'running' ? w.job : null;
+  const v = workerView(w);
+  const line = (j, i) => {
+    const isRun = j.name === running;
+    const title = S.games.get(j.slug)?.title || j.slug;
+    const extra = j.type === 'regenerate' && j.payload?.sections ? ` (${j.payload.all ? 'tüm video' : j.payload.sections.length + ' bölüm'})` : '';
+    return `<div class="task ${isRun ? 'run' : ''}">
+      <span class="task-n">${isRun ? '▶' : i + 1}</span>
+      <div style="flex:1;min-width:0"><b>${esc(title)}</b>: ${esc(JOB_LABEL[j.type] || j.type)}${esc(extra)}
+        <div class="small muted">${esc(j.by || '?')} istedi · ${isRun ? `çalışıyor (${sinceText(w.at)})` : `sırada (${sinceText(j.at)})`}</div></div>
+      <a class="small" href="#/game/${encodeURIComponent(j.slug)}">aç →</a>
+    </div>`;
+  };
+  const state = v ? `<span class="worker-pill ${v.cls}" title="${esc(v.long)}">${esc(v.short)}</span>` : '';
+  box.innerHTML = `<div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span>${state}</div>
+    ${jobs.length ? `<div class="tasks-list">${jobs.map(line).join('')}</div>
+      <p class="small muted" style="margin:8px 0 0">İşler sırayla yapılır; bir araştırma ~15–30 dk sürer. Kağan'ın bilgisayarı kapalıysa açılınca devam eder.</p>`
+    : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, Claude yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace('Son is bitti', 'Son biten iş')) : ''}</p>`}`;
 }
 
 /* ---------- router / boot ---------- */
