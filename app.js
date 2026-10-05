@@ -257,7 +257,7 @@ function settingsModal(firstRun = false) {
       <p id="tokMsg" class="small"></p>
     </div>`);
   $('#tokSave').onclick = async () => {
-    const v = $('#tokIn').value.replace(/s+/g, '');
+    const v = $('#tokIn').value.replace(/\s+/g, '');
     if (!v) return;
     $('#tokMsg').textContent = 'Bağlanılıyor…';
     try {
