@@ -94,7 +94,9 @@ class GitHubStore {
       headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' },
     });
     if (!r.ok) throw new Error(`GitHub ${r.status}`);
-    return URL.createObjectURL(await r.blob());
+    // GitHub raw yanıtı octet-stream döner; <video>/<audio> için doğru türü veriyoruz.
+    const type = { mp4: 'video/mp4', mp3: 'audio/mpeg', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif' }[path.split('.').pop()] || '';
+    return URL.createObjectURL(new Blob([await r.arrayBuffer()], { type }));
   }
 }
 class LocalDemoStore {
