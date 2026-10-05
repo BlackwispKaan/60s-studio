@@ -333,6 +333,7 @@ async function renderHome() {
       <h1>60 saniyede oyunlar</h1>
       <p class="muted" style="margin:0">Yeni bir oyun yaz. Claude araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
     </div>
+    ${workerBanner()}
     ${S.store.demo ? '<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">⚠️ <b>Demo modu</b>: yerel dosyalar okunuyor, değişiklikler kaydedilmez. Kaydetmek için ⚙ ile token gir.</div>' : ''}
     <form class="new-game card" id="newGame" style="margin-bottom:24px">
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
@@ -567,6 +568,7 @@ async function renderGame(slug) {
     </div>
     ${pipelineHtml(g)}
     <div class="stack" style="margin-top:20px">
+      ${workerBanner()}
       ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? 'Claude araştırıyor…' : 'Claude araştırma yapacak'}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
       ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>Claude yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
       ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">Claude kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
@@ -887,11 +889,46 @@ async function renderIntegrations() {
   };
 }
 
+/* ---------- worker durumu (Kağan'ın PC'sindeki arka plan Claude) ---------- */
+const fmtTime = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
+const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', build: 'kurgu', revise: 'düzeltme' };
+function jobName(j) {
+  const m = /^\d{8}T\d{6}-([a-z_]+)-(.+)$/.exec(j || '');
+  if (!m) return j || '';
+  return `${S.games.get(m[2])?.title || m[2]}: ${JOB_LABEL[m[1]] || m[1]}`;
+}
+function workerView(w0) {
+  if (!w0) return null;
+  const w = { ...w0, job: jobName(w0.job) };
+  const ageH = (Date.now() - new Date(w.at).getTime()) / 36e5;
+  if (w.state === 'running' && ageH > 3) return { cls: 'warn', short: '⚠️ Worker yanıt vermiyor', long: `Son durum ${fmtTime(w.at)}: "${w.job}" çalışıyordu ama 3 saattir haber yok. Kağan'ın bilgisayarı kapanmış olabilir; açılınca iş devam eder.` };
+  if (w.state === 'running') return { cls: 'run', short: '🟢 Claude çalışıyor', long: `Arka planda Claude şu işi yapıyor: ${w.job}` };
+  if (w.state === 'limited') {
+    const reset = w.resetAt ? fmtTime(w.resetAt) : 'bilinmiyor';
+    return { cls: 'warn', short: `⏸ Limit doldu · ${reset}`, long: `Claude kullanım limiti doldu, "${w.job}" yarım kaldı. ${reset} civarında limit sıfırlanınca kaldığı yerden otomatik devam edecek. (${w.message})`, banner: true };
+  }
+  if (w.state === 'error') return { cls: 'bad', short: '⚠️ Worker hatası', long: `"${w.job || ''}" işinde hata oldu: ${w.message}. Kuyruktaki iş 5 dakika sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.`, banner: true };
+  return { cls: 'idle', short: '● Boşta', long: `Worker boşta. ${w.message || ''} (${fmtTime(w.at)})` };
+}
+async function loadWorkerStatus() {
+  try { S.worker = (await readJSON('config/worker_status.json'))?.data || null; } catch { S.worker = null; }
+  const v = workerView(S.worker), el = $('#workerState');
+  if (!el) return;
+  if (!v) { el.hidden = true; return; }
+  el.hidden = false; el.className = `worker-pill ${v.cls}`; el.textContent = v.short; el.title = v.long;
+  el.onclick = () => openModal(`<h2>Arka plan Claude</h2><p>${esc(v.long)}</p><p class="small muted">Son güncelleme: ${fmtDate(S.worker.at)}</p>`);
+}
+function workerBanner() {
+  const v = workerView(S.worker);
+  return v?.banner || v?.cls === 'warn' ? `<div class="card worker-banner ${v.cls}">${esc(v.short)}: ${esc(v.long)}</div>` : '';
+}
+
 /* ---------- router / boot ---------- */
 async function route() {
   if (!S.user) { $('#app').innerHTML = `<div class="card empty"><h2>Önce sağ üstten ismini seç 👆</h2></div>`; return; }
   const h = location.hash.replace(/^#/, '') || '/';
   const m = h.match(/^\/game\/(.+)$/);
+  loadWorkerStatus();
   try {
     if (m) await renderGame(decodeURIComponent(m[1]));
     else if (h === '/integrations') await renderIntegrations();
@@ -903,6 +940,7 @@ async function route() {
 }
 async function boot() {
   try { const t = await readJSON('team.json'); if (t?.data?.members?.length) S.members = t.data.members; } catch {}
+  await loadWorkerStatus();
   try {
     const c = await readJSON('config/studio.json'); S.config = c?.data || {};
     const a = $('#driveRoot'); if (a && S.config.driveRootUrl) { a.href = S.config.driveRootUrl; a.innerHTML = DRIVE_SVG; a.hidden = false; }

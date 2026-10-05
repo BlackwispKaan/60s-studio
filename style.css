@@ -230,3 +230,14 @@ details summary { cursor: pointer; font-weight: 600; }
 .custom-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 0; }
 .custom-form input { font-size: 12.5px; padding: 6px 8px; }
 input[type=range] { accent-color: var(--accent); width: 100%; }
+
+/* Worker durumu */
+.worker-pill { border: 1px solid var(--border); background: var(--surface-2); border-radius: 99px; padding: 5px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; color: var(--muted); }
+.worker-pill[hidden] { display: none; }
+.worker-pill.run { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, var(--border)); }
+.worker-pill.warn { color: var(--warn); border-color: var(--warn); }
+.worker-pill.bad { color: var(--bad); border-color: var(--bad); }
+.worker-banner { margin-bottom: 16px; font-size: 14px; }
+.worker-banner.warn { border-color: var(--warn); }
+.worker-banner.bad { border-color: var(--bad); }
+@media (max-width: 600px) { .worker-pill { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }
