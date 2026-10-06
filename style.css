@@ -123,7 +123,7 @@ h2 { font-size: 18px; font-weight: 700; }
 /* Önce seçenek, sonra meme: seçili olmayan seçenekte seçim kontrolleri gizli, önizleme açık */
 .opt:not(.selected) .pick-hint { display: block; }
 .opt:not(.selected) .cand-pick, .opt:not(.selected) .cand.custom, .opt:not(.selected) .canon-add,
-.opt:not(.selected) .need-del, .opt:not(.selected) .at-chip { display: none; }
+.opt:not(.selected) .need-del, .opt:not(.selected) .at-chip, .opt:not(.selected) .need-fb { display: none; }
 .opt:not(.selected) .cand.chosen { border-color: var(--border); box-shadow: none; }
 .opt.selected .radio { border-color: var(--accent); background: radial-gradient(var(--accent) 45%, transparent 50%); }
 .opt-letter { font-family: Anton, Impact, sans-serif; color: var(--muted); font-size: 14px; margin-right: 6px; }
@@ -315,3 +315,11 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .owners .heads { display: inline-flex; margin-right: 2px; }
 .owners .head { width: 16px; height: 16px; }
 .owners .head + .head { margin-left: -3px; }
+
+/* Meme vuruşu: neden komik / uyarı / geri bildirim */
+.need-why { font-size: 12.5px; color: var(--muted); margin: 2px 0 6px; line-height: 1.4; }
+.need-why b { color: var(--text); font-weight: 600; }
+.need-warn { font-size: 12.5px; color: var(--warn); margin: 2px 0 6px; }
+.need-note { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+.need-fb { margin-left: 6px; }
+.need-fb.on { color: var(--warn); }

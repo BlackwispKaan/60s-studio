@@ -502,7 +502,12 @@ function customCandHtml(sec, o, n) {
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
   const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Anlatımın hangi kelimesinde/anında girsin? (boşsa Askeri Ücretli Çalışan seçer)">⏱ ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'an ekle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
-    ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}</div>`;
+    ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}
+    ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎 Alakasız'}</button>` : ''}</div>
+    ${n.why ? `<div class="need-why">💡 <b>Neden komik:</b> ${esc(n.why)}</div>` : ''}
+    ${n.review ? `<div class="need-warn">⚠️ ${esc(n.review)}</div>` : ''}
+    ${n.replaced ? `<div class="need-note">🔄 Değişti: <i>${esc(n.replaced.from)}</i> yerine${n.replaced.reason ? ` · sebep: ${esc(n.replaced.reason)}` : ''}</div>` : ''}
+    ${n.feedback && !n.feedbackDone ? `<div class="need-note">👎 ${esc(n.feedback.by)}: “${esc(n.feedback.reason || 'alakasız')}” · alttan <b>Tekrar yap</b>'a basınca işlenir</div>` : ''}`;
   return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
 }
 
@@ -689,7 +694,8 @@ async function playPreview(el) {
   } catch { toast('Video yüklenemedi', true); el.classList.remove('loading'); }
 }
 
-const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length);
+const feedbackCount = (g) => g.sections.reduce((k, s) => k + s.options.reduce((m, o) => m + (o.needs || []).filter((n) => n.feedback && !n.feedbackDone).length, 0), 0);
+const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length) + feedbackCount(g);
 
 /* ---------- Meme Kanonu galerisi ---------- */
 async function canonModal(onAdd) {
@@ -804,6 +810,20 @@ function bindGame(g0) {
     inp.onblur = save;
     chip.replaceWith(inp); inp.focus();
   });
+  document.querySelectorAll('.need-fb').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file] = b.dataset.fb.split('|');
+    const n = findNeed(g, sid, oid, file), who = S.user;
+    if (n.feedback && !n.feedbackDone) {
+      queueOp(slug, (x) => { delete findNeed(x, sid, oid, file).feedback; }, `${file} 👎 geri alındı`);
+    } else {
+      const reason = prompt('Bu meme neden uymuyor? (kısa yaz, örn. "repliği tekrar ediyor", "alakasız", "komik değil")', '');
+      if (reason === null) return;
+      queueOp(slug, (x) => { const m = findNeed(x, sid, oid, file); m.feedback = { by: who, at: nowIso(), reason: reason.trim() }; delete m.feedbackDone; }, `${file} 👎`);
+    }
+    renderGame(slug);
+  });
   document.querySelectorAll('.need-del').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
     const [sid, oid, file] = b.dataset.del.split('|');
@@ -843,16 +863,19 @@ function bindGame(g0) {
   const rgb = $('#regenBtn');
   if (rgb) rgb.onclick = async () => {
     const ids = g.regenAll ? g.sections.map((s) => s.id) : g.sections.filter((s) => s.regen).map((s) => s.id);
-    if (!ids.length) return;
-    if (!confirm(`${g.regenAll ? 'Tüm video' : ids.length + ' bölüm'} notlarınıza göre yeniden önerilecek. Bu bölümlerdeki mevcut seçimler sıfırlanır. Devam?`)) return;
+    const fb = feedbackCount(g);
+    if (!ids.length && !fb) return;
+    const parts = [ids.length ? `${g.regenAll ? 'Tüm video' : ids.length + ' bölüm'} notlarınıza göre yeniden önerilecek (bu bölümlerdeki seçimler sıfırlanır)` : '',
+      fb ? `${fb} meme 👎 geri bildirimine göre değiştirilecek` : ''].filter(Boolean);
+    if (!confirm(parts.join('\n') + '.\nDevam?')) return;
     rgb.disabled = true;
     try {
       await flush(slug);
       await mutateGame(slug, (x) => {
-        x.status = 'queued_regen'; x.regenSections = ids;
-        logLine(x, `Yeniden öneri istendi: ${g.regenAll ? 'tüm video' : ids.map((id) => 'S' + (x.sections.findIndex((s) => s.id === id) + 1)).join(', ')}.`);
+        if (ids.length) { x.status = 'queued_regen'; x.regenSections = ids; }
+        logLine(x, [ids.length ? `Yeniden öneri istendi: ${g.regenAll ? 'tüm video' : ids.map((id) => 'S' + (x.sections.findIndex((s) => s.id === id) + 1)).join(', ')}.` : '', fb ? `${fb} meme için 👎 geri bildirimi gönderildi.` : ''].filter(Boolean).join(' '));
       }, 'yeniden öneri istendi');
-      await enqueue('regenerate', slug, { sections: ids, brief: g.brief || '', all: !!g.regenAll });
+      await enqueue('regenerate', slug, { sections: ids, brief: g.brief || '', all: !!g.regenAll, feedback: fb > 0 });
       toast('Kuyruğa alındı ✓'); renderGame(slug);
     } catch (e) { toast('Gönderilemedi: ' + e.message, true); rgb.disabled = false; }
   };
