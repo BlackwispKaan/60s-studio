@@ -644,13 +644,23 @@ async function renderGame(slug) {
       <span class="spacer"></span>
       <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
       ${g.status === 'collecting' ? `<button class="btn" id="startBtn">▶ Başla</button>` : ''}
-      <button class="btn btn-primary" id="exportBtn" ${st.chosen === st.total ? '' : 'disabled'}>Çıktı al</button>
+      <button class="btn btn-primary" id="exportBtn" ${st.chosen === st.total ? '' : 'disabled'}>${exportFresh(g) ? '📋 Çıktıyı göster' : 'Çıktı al'}</button>
     </div></div>` : ''}
   `;
   bindGame(g);
 }
 
-function selectionSig(g) { return g.sections.map((s) => s.selected || '-').join(''); }
+// Çıktıyı etkileyen her şeyin imzası: seçili seçenekler, meme/ses seçimleri, kendi linkler, altyazı.
+// Değişmediyse "Çıktı al" yeniden oluşturmaz, kayıtlı çıktıyı gösterir.
+function selectionSig(g) {
+  const raw = JSON.stringify([g.settings?.captions, ...g.sections.map((s) => {
+    const o = selectedOpt(s);
+    return [s.selected || '-', ...(o?.needs || []).map((n) => [n.file, n.chosen || '', n.custom?.url || '', n.at || ''])];
+  })]);
+  let h = 5381; for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) | 0;
+  return 'v2:' + (h >>> 0).toString(36);
+}
+const exportFresh = (g) => !!(g.materials?.length && g.exportSig && g.exportSig === selectionSig(g));
 
 /* ---------- önizleme medyası (özel repodan blob olarak) ---------- */
 const blobCache = new Map();
@@ -725,7 +735,7 @@ function updateFooter(g) {
   const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
   const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
   const s = $('#stSecs'); if (s) { s.textContent = `~${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
-  const b = $('#exportBtn'); if (b) b.disabled = st.chosen !== st.total;
+  const b = $('#exportBtn'); if (b) { b.disabled = st.chosen !== st.total; b.textContent = exportFresh(g) ? '📋 Çıktıyı göster' : 'Çıktı al'; }
 }
 
 function bindGame(g0) {
@@ -894,7 +904,9 @@ function bindGame(g0) {
   if (drive) drive.onchange = () => { const v = drive.value.trim(); queueOp(slug, (x) => { x.settings.mediaFolderUrl = v; }, 'Drive linki'); };
 
   const exp = $('#exportBtn');
-  if (exp) exp.onclick = async () => {
+  if (exp) exp.onclick = async (ev, force = false) => {
+    await flush(slug);
+    if (!force && exportFresh(cur())) return exportModal(cur()); // değişiklik yok → kayıtlı çıktı
     const miss = missingChoices(g).length;
     if (miss && !confirm(`${miss} meme/ses efekti için seçim yapılmadı. Bunlarda ilk aday kullanılacak. Devam edilsin mi?`)) return;
     exp.disabled = true; exp.textContent = 'Hazırlanıyor…';
@@ -910,6 +922,7 @@ function bindGame(g0) {
         (await S.store.get(`games/${slug}/MATERIALS.md`))?.sha);
       await renderGame(slug);
       exportModal(ng);
+      toast('Çıktı oluşturuldu ✓ — Drive klasörüne de birkaç dakika içinde kopyalanır');
     } catch (e) { toast('Çıktı alınamadı: ' + e.message, true); exp.disabled = false; exp.textContent = 'Çıktı al'; }
   };
   const show = $('#showExport'); if (show) show.onclick = () => exportModal(g);
@@ -948,13 +961,18 @@ function exportModal(g) {
   const md = materialsMarkdown(g);
   openModal(`
     <h2>📋 ${esc(g.title)}: Çıktı</h2>
-    <p class="muted small">Liste repoya da kaydedildi (<code>games/${esc(g.slug)}/MATERIALS.md</code>). Materyalleri topladıkça sayfadaki kutuları işaretleyin, hepsi bitince <b>▶ Başla</b>.</p>
+    <p class="muted small">Oluşturan: <b>${esc(g.exportedBy || '?')}</b> · ${fmtDate(g.exportedAt)}${exportFresh(g) ? ' · <span style="color:var(--good)">güncel ✓</span>' : ' · <span style="color:var(--warn)">seçimler değişti, yeniden oluşturun</span>'}<br>
+      Liste repoda (<code>games/${esc(g.slug)}/MATERIALS.md</code>) ve oyunun Drive klasöründe <code>MATERIALS.md</code> olarak duruyor. Materyalleri topladıkça kutuları işaretleyin, hepsi bitince <b>▶ Başla</b>.</p>
     <div class="script-box" id="mdBox">${esc(md)}</div>
     <div class="row" style="margin-top:12px">
       <button class="btn btn-primary" id="mdCopy">Kopyala</button>
       <button class="btn" id="mdDl">.md indir</button>
       <button class="btn" id="voCopy">Sadece anlatım metnini kopyala</button>
+      ${g.settings?.mediaFolderUrl ? driveLink(g) : ''}
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="mdRegen" title="Seçimler aynı olsa da listeyi baştan oluştur">↻ Yeniden oluştur</button>
     </div>`);
+  $('#mdRegen').onclick = () => { closeModal(); const b = $('#exportBtn'); if (b && b.onclick) b.onclick(null, true); };
   const copy = async (t) => { try { await navigator.clipboard.writeText(t); toast('Kopyalandı ✓'); } catch { toast('Kopyalanamadı', true); } };
   $('#mdCopy').onclick = () => copy(md);
   $('#voCopy').onclick = () => copy(narrationScript(g));
