@@ -509,11 +509,9 @@ function customCandHtml(sec, o, n) {
 
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  const others = sec.options.filter((x) => x.id !== o.id).flatMap((x) => (x.needs || []).filter((m) => m.type === n.type && m.candidates?.length)).length;
   const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Anlatımın hangi kelimesinde/anında girsin? (boşsa Askeri Ücretli Çalışan seçer)">⏱ ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'an ekle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
     ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}</div>`;
-  const cross = n.candidates?.length && others ? `<button type="button" class="link-btn small cross-btn" data-cross="${key}">↔ Bölümdeki diğer seçeneklerin adaylarından seç</button>` : '';
-  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) + cross : refsHtml(n.refs));
+  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
 }
 
 function optionHtml(sec, o, slug) {
@@ -525,7 +523,7 @@ function optionHtml(sec, o, slug) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      <dt>Meme / ses</dt><dd>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n) => needHtml(slug, sec, o, n)).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
+      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Meme seçmek için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n) => needHtml(slug, sec, o, n)).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
         <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
       ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
@@ -753,6 +751,7 @@ function bindGame(g0) {
   document.querySelectorAll('.cand-pick').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!b.closest('.opt')?.classList.contains('selected')) return toast('Önce bu seçeneği seç, sonra memeyi.');
     const [sid, oid, file, cid] = b.dataset.pick.split('|');
     const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
     const val = find(g).chosen === cid ? null : cid;
@@ -777,26 +776,6 @@ function bindGame(g0) {
   });
   document.querySelectorAll('.cands a').forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
   const findNeed = (x, sid, oid, file) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
-  // ↔ Aynı bölümdeki diğer seçeneklerin adaylarından seç
-  document.querySelectorAll('.cross-btn').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
-    const [sid, oid, file] = b.dataset.cross.split('|');
-    const sec = g.sections.find((s) => s.id === sid), target = findNeed(g, sid, oid, file);
-    const pool = sec.options.filter((x) => x.id !== oid).flatMap((x) => (x.needs || []).filter((m) => m.type === target.type).flatMap((m) => (m.candidates || []).map((c) => ({ c, from: `${x.id.toUpperCase()} · ${m.desc}` }))));
-    openModal(`<h2>Diğer seçeneklerin adayları</h2><p class="small muted">Seçtiğin aday bu seçeneğe eklenir ve seçilir.</p>
-      <div class="cands">${pool.map(({ c, from }, i) => `<div class="cand">
-        <button type="button" class="cand-media ${c.audio ? 'sfx' : ''}" data-play="${esc((c.pvBase || `games/${slug}/previews/`) + (c.audio || c.video))}" data-kind="${c.audio ? 'sfx' : 'meme'}">${c.audio ? '<span class="sfx-icon">🔊</span>' : `<img data-src="${esc((c.pvBase || `games/${slug}/previews/`) + c.thumb)}" alt="">`}<span class="play-badge">▶</span></button>
-        <div class="cand-title">${esc(c.title)}<div class="small muted">${esc(from)}</div></div>
-        <div class="cand-actions"><button type="button" class="btn btn-primary cross-pick" data-i="${i}">Bunu kullan</button></div></div>`).join('')}</div>`);
-    hydrateThumbs();
-    document.querySelectorAll('#modalBody .cand-media[data-play]').forEach((el) => el.onclick = () => playPreview(el));
-    document.querySelectorAll('.cross-pick').forEach((pb) => pb.onclick = () => {
-      const c = pool[+pb.dataset.i].c;
-      queueOp(slug, (x) => { const n = findNeed(x, sid, oid, file); if (!n.candidates.some((k) => k.id === c.id)) n.candidates.push({ ...c }); n.chosen = c.id; }, `${file} → ${c.id}`);
-      closeModal(); renderGame(slug);
-    });
-  });
   // + Kanondan meme ekle
   document.querySelectorAll('.canon-add').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();

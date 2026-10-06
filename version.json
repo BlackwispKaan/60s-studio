@@ -1,8 +1,13 @@
 {
- "v": 22,
- "at": "2026-10-06T17:56:47+00:00",
- "msg": "Çıktı al: seçimler değişmediyse kayıtlı çıktıyı gösterir; Drive linki ve Yeniden oluştur",
+ "v": 23,
+ "at": "2026-10-06T22:09:43+00:00",
+ "msg": "Önce seçenek sonra meme: seçili olmayan seçenekte meme seçimi kapalı; çapraz aday seçimi kaldırıldı",
  "history": [
+  {
+   "v": 23,
+   "at": "2026-10-06T22:09:43+00:00",
+   "msg": "Önce seçenek sonra meme: seçili olmayan seçenekte meme seçimi kapalı; çapraz aday seçimi kaldırıldı"
+  },
   {
    "v": 22,
    "at": "2026-10-06T17:56:47+00:00",

@@ -119,6 +119,12 @@ h2 { font-size: 18px; font-weight: 700; }
 .opt:hover { border-color: var(--border); }
 .opt.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
 .opt .radio { position: absolute; left: 14px; top: 16px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); }
+.pick-hint { display: none; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+/* Önce seçenek, sonra meme: seçili olmayan seçenekte seçim kontrolleri gizli, önizleme açık */
+.opt:not(.selected) .pick-hint { display: block; }
+.opt:not(.selected) .cand-pick, .opt:not(.selected) .cand.custom, .opt:not(.selected) .canon-add,
+.opt:not(.selected) .need-del, .opt:not(.selected) .at-chip { display: none; }
+.opt:not(.selected) .cand.chosen { border-color: var(--border); box-shadow: none; }
 .opt.selected .radio { border-color: var(--accent); background: radial-gradient(var(--accent) 45%, transparent 50%); }
 .opt-letter { font-family: Anton, Impact, sans-serif; color: var(--muted); font-size: 14px; margin-right: 6px; }
 .opt-en { font-size: 16.5px; font-weight: 600; line-height: 1.45; }
