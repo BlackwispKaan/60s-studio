@@ -493,7 +493,7 @@ function customCandHtml(sec, o, n) {
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
   const others = sec.options.filter((x) => x.id !== o.id).flatMap((x) => (x.needs || []).filter((m) => m.type === n.type && m.candidates?.length)).length;
-  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.at ? ` <span class="at-chip">⏱ “${esc(n.at)}”</span>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
+  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Anlatımın hangi kelimesinde/anında girsin? (boşsa Askeri Ücretli Çalışan seçer)">⏱ ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'an ekle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
     ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}</div>`;
   const cross = n.candidates?.length && others ? `<button type="button" class="link-btn small cross-btn" data-cross="${key}">↔ Bölümdeki diğer seçeneklerin adaylarından seç</button>` : '';
   return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) + cross : refsHtml(n.refs));
@@ -690,19 +690,13 @@ async function canonModal(onAdd) {
     document.querySelectorAll('#canonGrid .cand-media').forEach((el) => el.onclick = () => playPreview(el));
     document.querySelectorAll('.canon-pick').forEach((b) => b.onclick = () => {
       const c = S.canon.find((x) => x.id === b.dataset.cid);
-      $('#canonPicked').hidden = false;
-      $('#canonPickedName').textContent = c.name;
-      $('#canonAt').focus();
-      $('#canonAddBtn').onclick = () => { const at = $('#canonAt').value.trim(); closeModal(); onAdd(c, at); toast(`${c.name} eklendi ✓`); };
+      // Seçenek zaten belli; tek tıkla ekle. Anı (kelime) sonradan ⏱ etiketinden yazılabilir.
+      closeModal(); onAdd(c, ''); toast(`${c.name} eklendi ✓ · istersen ⏱ ile anını belirt`);
     });
   };
   $('#modalBody').innerHTML = `<h2>🏆 Meme Kanonu</h2>
-    <p class="small muted" style="margin-top:0">Herkesin bildiği ${S.canon.length} meme, orijinal sahneleriyle. Önizlemek için tıkla, eklemek için Seç.</p>
+    <p class="small muted" style="margin-top:0">Herkesin bildiği ${S.canon.length} meme, orijinal sahneleriyle. Önizlemek için tıkla, eklemek için <b>Seç</b> (tek tık).</p>
     <input type="text" id="canonQ" placeholder="Ara: polis, kaçış, şaşkınlık, para, ölüm, siyasi…" style="width:100%;margin-bottom:10px">
-    <div id="canonPicked" class="card" hidden style="margin-bottom:10px">
-      <b id="canonPickedName"></b> · Anlatımın hangi kelimesinde/anında girsin?
-      <div class="row" style="margin-top:6px"><input type="text" id="canonAt" style="flex:1" placeholder="örn. “five-star wanted level” sonrası"><button class="btn btn-primary" id="canonAddBtn">Ekle</button></div>
-    </div>
     <div id="canonGrid" class="cands canon-grid"></div>`;
   $('#modal .modal-card').classList.add('wide');
   $('#canonQ').oninput = (e) => draw(e.target.value);
@@ -793,6 +787,24 @@ function bindGame(g0) {
       }, `${file} kanondan eklendi`);
       renderGame(slug);
     });
+  });
+  document.querySelectorAll('.at-chip').forEach((chip) => chip.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file] = chip.dataset.at.split('|');
+    const cur = findNeed(g, sid, oid, file).at || '';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'at-input'; inp.value = cur.replace(/^"|"$/g, '');
+    inp.placeholder = 'örn. five-star wanted level (boş = otomatik)';
+    inp.onclick = (e) => e.stopPropagation();
+    const save = () => {
+      const v = inp.value.trim();
+      queueOp(slug, (x) => { findNeed(x, sid, oid, file).at = v; }, `${file} anı`);
+      chip.textContent = v ? `⏱ “${v}”` : '⏱ an ekle'; inp.replaceWith(chip);
+    };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.replaceWith(chip); } };
+    inp.onblur = save;
+    chip.replaceWith(inp); inp.focus();
   });
   document.querySelectorAll('.need-del').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
