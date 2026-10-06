@@ -309,3 +309,9 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .chip-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); border-radius: 99px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .chip-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .act-game { width: 100%; font-size: 13px; padding: 5px 8px; margin-bottom: 4px; }
+
+/* Çalışan kafaları (kişi başına renk) */
+.owners { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.owners .heads { display: inline-flex; margin-right: 2px; }
+.owners .head { width: 16px; height: 16px; }
+.owners .head + .head { margin-left: -3px; }

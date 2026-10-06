@@ -232,39 +232,22 @@ function missingChoices(g) {
   // Seçili seçeneklerde, adayı olan ama ekibin henüz seçim yapmadığı meme/sfx ihtiyaçları
   return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.candidates?.length && (!n.chosen || (n.chosen === 'custom' && !n.custom?.url))));
 }
-function narrationScript(g) {
-  return g.sections.map((s, i) => `[S${i + 1} · ${s.time}] ${selectedOpt(s)?.narration || '—'}`).join('\n\n');
-}
 function materialsMarkdown(g) {
+  // Ekip için sade liste: hangi bölüm, ne kaydedilecek, hangi adla. Claude/worker'ın kendi hazırladıkları (meme/sfx/anlatım) burada yok.
   const mats = g.materials.filter((m) => !m.auto);
-  const autos = g.materials.filter((m) => m.auto);
-  const by = (t) => mats.filter((m) => m.type === t);
-  const line = (m) => `- [${m.done ? 'x' : ' '}] **${m.section}** ${m.desc}\n  - Dosya adı: \`${m.file}\`${m.source ? `\n  - Kaynak: ${m.source}` : ''}${m.search ? `\n  - Arama: "${m.search}"` : ''}${(m.refs || []).map((r) => `\n  - Örnek: [${r.label}](${r.url})`).join('')}`;
-  const st = stats(g);
-  return `# ${g.title} — Materyal Listesi
+  const folder = g.settings?.mediaFolderUrl ? `[Drive: ${g.slug}](${g.settings.mediaFolderUrl})` : `Drive'daki \`${g.slug}/\` klasörü`;
+  const icon = { gameplay: '🎮', meme: '😂', sfx: '🔊' };
+  const secs = g.sections.map((s, i) => {
+    const items = mats.filter((m) => m.section === `S${i + 1}`);
+    if (!items.length) return '';
+    return `## S${i + 1} · ${s.time} — ${s.title}\n${items.map((m) => `- [${m.done ? 'x' : ' '}] ${icon[m.type] || '•'} \`${m.file}\` — ${m.desc}${m.type !== 'gameplay' && m.search ? ` (ara: "${m.search}")` : ''}`).join('\n')}`;
+  }).filter(Boolean).join('\n\n');
+  return `# ${g.title} — Toplanacak materyaller (${mats.length})
 
-Çıktı: ${fmtDate(g.exportedAt)} · ${g.exportedBy} · Tahmini anlatım: ~${st.secs} sn (${st.words} kelime)
-Altyazı: ${CAPTIONS.find((c) => c.v === g.settings.captions)?.label}
+Hepsini ${folder} içine, **tam olarak yazan dosya adıyla** koyun.
+Klipleri 2 sn kadar uzun kesin, kırpmayı ${WORKER_NAME} yapar. Mümkünse 1080p.
 
-Dosyaları Google Drive'da \`${g.slug}/\` klasörüne, **tam olarak belirtilen dosya adıyla** koyun.
-Klipleri biraz uzun kesin (±2 sn pay); kırpmayı ben yaparım. HUD'lu/HUD'suz fark etmez, mümkünse 1080p+.
-
-## 🎮 Oyun görüntüleri (${by('gameplay').length})
-${by('gameplay').map(line).join('\n')}
-
-## 😂 Meme / reaksiyon klipleri (${by('meme').length})
-${by('meme').map(line).join('\n') || '- (yok)'}
-
-## 🔊 Ses efektleri (${by('sfx').length})
-${by('sfx').map(line).join('\n') || '- (yok)'}
-
-## 🤖 ${WORKER_NAME}'ın hazırladıkları (sizin bir şey yapmanız gerekmez) (${autos.length})
-${autos.map((m) => `- **${m.section}** ${TYPE_LABEL[m.type]}: ${m.chosenTitle}${m.chosenExplicit ? '' : ' _(seçim yapılmadı, ilk aday)_'} → \`${m.file}\``).join('\n') || '- (yok)'}
-
-## 🎙️ Anlatıcı (ElevenLabs — ${WORKER_NAME} API ile otomatik üretir, sizin bir şey yapmanız gerekmez)
-\`\`\`
-${narrationScript(g)}
-\`\`\`
+${secs || '_Sizden istenen materyal yok._'}
 `;
 }
 
@@ -385,9 +368,9 @@ async function renderHome() {
         <div class="row">${statusPill(g)}<span class="spacer"></span>
           ${driveLink(g, 'icon-btn sm')}
           <button class="icon-btn sm" data-edit="${esc(g.slug)}" title="Projeyi düzenle" aria-label="Projeyi düzenle">⋯</button></div>
-        <h3>${esc(g.title)}</h3>
+        <h3 lang="en">${esc(g.title)}</h3>
         <div class="progress"><span style="width:${Math.round((st / 5) * 100)}%"></span></div>
-        <div class="row small muted"><span>${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</span><span class="spacer"></span><span>👥 ${esc(owners(g).join(', '))}</span></div>
+        <div class="row small muted"><span>${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</span><span class="spacer"></span>${ownersHtml(g)}</div>
       </div>`;
     }).join('')}</div>` : '<div class="card empty muted">Henüz oyun yok.</div>'}
     </div></div>
@@ -423,6 +406,15 @@ async function renderHome() {
 }
 
 const owners = (g) => (g.owners?.length ? g.owners : g.owner ? [g.owner] : []);
+// Her ekip üyesine sabit renk (kırmızı / mavi / yeşil …), çalışan sayısı kadar kafa yan yana
+const MEMBER_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#ec4899'];
+const memberColor = (name) => { const i = S.members.indexOf(name); return MEMBER_COLORS[(i >= 0 ? i : [...name].reduce((h, c) => h + c.charCodeAt(0), 0)) % MEMBER_COLORS.length]; };
+const headSvg = (name) => `<svg class="head" viewBox="0 0 24 24" aria-hidden="true" style="color:${memberColor(name)}"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path d="M3.5 21c.6-4.4 4.2-7 8.5-7s7.9 2.6 8.5 7z" fill="currentColor"/></svg>`;
+function ownersHtml(g, strong = false) {
+  const os = owners(g);
+  if (!os.length) return '<span class="muted">—</span>';
+  return `<span class="owners" title="${esc(os.join(', '))}"><span class="heads">${os.map(headSvg).join('')}</span>${os.map((n) => `<span class="owner-name" style="color:${memberColor(n)}${strong ? ';font-weight:600' : ''}">${esc(n)}</span>`).join('<span class="muted">,</span> ')}</span>`;
+}
 const DRIVE_SVG = '<svg viewBox="0 0 87.3 78" width="16" height="16" aria-hidden="true"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
 function driveLink(g, cls = 'btn') {
   const url = g?.settings?.mediaFolderUrl;
@@ -605,9 +597,9 @@ async function renderGame(slug) {
   const stale = g.status === 'collecting' && g.exportSig && g.exportSig !== selectionSig(g);
   app.innerHTML = `
     <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
-    <div class="row" style="margin-top:8px"><h1>${esc(g.title)}</h1><span class="spacer"></span>${driveLink(g)}${statusPill(g)}</div>
+    <div class="row" style="margin-top:8px"><h1 lang="en">${esc(g.title)}</h1><span class="spacer"></span>${driveLink(g)}${statusPill(g)}</div>
     <div class="row small muted" style="margin-top:4px">
-      <span>👥 Çalışanlar: <b style="color:var(--text)">${esc(owners(g).join(', '))}</b></span>
+      <span>Çalışanlar:</span> ${ownersHtml(g, true)}
       ${!owners(g).includes(S.user) ? `<button class="btn btn-ghost small" id="takeOwner" style="padding:3px 10px">Ben de katılayım</button>` : ''}
       <button class="btn btn-ghost small" id="editGame" style="padding:3px 10px">⋯ Düzenle</button>
       <span class="spacer"></span><span id="saveState"></span>
@@ -656,7 +648,7 @@ function selectionSig(g) {
     return [s.selected || '-', ...(o?.needs || []).map((n) => [n.file, n.chosen || '', n.custom?.url || '', n.at || ''])];
   })]);
   let h = 5381; for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) | 0;
-  return 'v2:' + (h >>> 0).toString(36);
+  return 'v3:' + (h >>> 0).toString(36);
 }
 const exportFresh = (g) => !!(g.materials?.length && g.exportSig && g.exportSig === selectionSig(g));
 
@@ -941,12 +933,11 @@ function exportModal(g) {
   openModal(`
     <h2>📋 ${esc(g.title)}: Çıktı</h2>
     <p class="muted small">Oluşturan: <b>${esc(g.exportedBy || '?')}</b> · ${fmtDate(g.exportedAt)}${exportFresh(g) ? ' · <span style="color:var(--good)">güncel ✓</span>' : ' · <span style="color:var(--warn)">seçimler değişti, yeniden oluşturun</span>'}<br>
-      Liste repoda (<code>games/${esc(g.slug)}/MATERIALS.md</code>) ve oyunun Drive klasöründe <code>MATERIALS.md</code> olarak duruyor. Materyalleri topladıkça kutuları işaretleyin, hepsi bitince <b>▶ Başla</b>.</p>
+      Bu liste oyunun Drive klasöründe de <code>MATERIALS.md</code> olarak duruyor. Materyalleri topladıkça aşağıdaki Materyaller kartında kutuları işaretleyin, hepsi bitince <b>▶ Başla</b>.</p>
     <div class="script-box" id="mdBox">${esc(md)}</div>
     <div class="row" style="margin-top:12px">
       <button class="btn btn-primary" id="mdCopy">Kopyala</button>
       <button class="btn" id="mdDl">.md indir</button>
-      <button class="btn" id="voCopy">Sadece anlatım metnini kopyala</button>
       ${g.settings?.mediaFolderUrl ? driveLink(g) : ''}
       <span class="spacer"></span>
       <button class="btn btn-ghost" id="mdRegen" title="Seçimler aynı olsa da listeyi baştan oluştur">↻ Yeniden oluştur</button>
@@ -954,7 +945,6 @@ function exportModal(g) {
   $('#mdRegen').onclick = () => { closeModal(); const b = $('#exportBtn'); if (b && b.onclick) b.onclick(null, true); };
   const copy = async (t) => { try { await navigator.clipboard.writeText(t); toast('Kopyalandı ✓'); } catch { toast('Kopyalanamadı', true); } };
   $('#mdCopy').onclick = () => copy(md);
-  $('#voCopy').onclick = () => copy(narrationScript(g));
   $('#mdDl').onclick = () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
