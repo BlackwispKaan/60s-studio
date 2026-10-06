@@ -283,7 +283,13 @@ function settingsModal(firstRun = false) {
     <div class="stack">
       <div class="field">
         <label for="tokIn">GitHub token</label>
-        <input id="tokIn" type="password" placeholder="github_pat_… veya ghp_…" value="${esc(tok)}" autocomplete="off">
+        <div class="row" style="flex-wrap:nowrap">
+          <input id="tokIn" type="password" placeholder="github_pat_… veya ghp_…" value="${esc(tok)}" autocomplete="off" spellcheck="false" autocapitalize="off" style="flex:1;min-width:0">
+          <button type="button" class="btn small" id="tokShow" title="Göster / gizle">👁 Göster</button>
+          <button type="button" class="btn small" id="tokCopy" title="Panoya kopyala">📋 Kopyala</button>
+        </div>
+        <span class="small muted" id="tokLen"></span>
+        <span class="small muted">📱 Telefona aktarmak için: bilgisayarda <b>Kopyala</b> → kendine mesaj at (WhatsApp/Discord) → telefonda yapıştır. 93 karakteri elle yazmak hataya çok açık.</span>
         <details class="small muted"><summary>Token nasıl alınır?</summary>
           <ol>
             <li>GitHub → sağ üst profil → <b>Settings</b> → en altta <b>Developer settings</b> → <b>Personal access tokens</b>.</li>
@@ -302,6 +308,16 @@ function settingsModal(firstRun = false) {
       </div>
       <p id="tokMsg" class="small"></p>
     </div>`);
+  const tokIn = $('#tokIn');
+  const showLen = () => { const v = tokIn.value.replace(/\s+/g, ''); $('#tokLen').textContent = v ? `${v.length} karakter · ${v.startsWith('github_pat_') ? 'fine-grained (~93 olmalı)' : v.startsWith('ghp_') ? 'classic (40 olmalı)' : '⚠️ github_pat_ veya ghp_ ile başlamıyor'}` : ''; };
+  tokIn.oninput = showLen; showLen();
+  $('#tokShow').onclick = () => { const h = tokIn.type === 'password'; tokIn.type = h ? 'text' : 'password'; $('#tokShow').textContent = h ? '🙈 Gizle' : '👁 Göster'; };
+  $('#tokCopy').onclick = async () => {
+    const v = tokIn.value.replace(/\s+/g, '');
+    if (!v) return toast('Kopyalanacak token yok', true);
+    try { await navigator.clipboard.writeText(v); toast('Token kopyalandı ✓ — kimseyle paylaşma'); }
+    catch { tokIn.type = 'text'; tokIn.select(); toast('Otomatik kopyalanamadı; seçili metni Ctrl+C ile kopyala', true); }
+  };
   $('#tokSave').onclick = async () => {
     const v = $('#tokIn').value.replace(/\s+/g, '');
     if (!v) return;
