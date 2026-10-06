@@ -1046,21 +1046,23 @@ async function renderTaskList() {
     jobs = await Promise.all(files.map(async (f) => ({ name: f.name.replace(/\.json$/, ''), ...((await readJSON(`queue/${f.name}`))?.data || {}) })));
   } catch {}
   const w = S.worker;
-  const running = w?.state === 'running' ? w.job : null;
+  const running = ['running', 'limited'].includes(w?.state) ? w.job : null;
   const v = workerView(w);
   const line = (j, i) => {
     const isRun = j.name === running;
     const title = S.games.get(j.slug)?.title || j.slug;
     const extra = j.type === 'regenerate' && j.payload?.sections ? ` (${j.payload.all ? 'tüm video' : j.payload.sections.length + ' bölüm'})` : '';
     return `<div class="task ${isRun ? 'run' : ''}">
-      <span class="task-n">${isRun ? '▶' : i + 1}</span>
+      <span class="task-n">${isRun ? (w.state === 'limited' ? '⏸' : '▶') : i + 1}</span>
       <div style="flex:1;min-width:0"><b>${esc(title)}</b>: ${esc(JOB_LABEL[j.type] || j.type)}${esc(extra)}
-        <div class="small muted">${esc(j.by || '?')} istedi · ${isRun ? `çalışıyor (${sinceText(w.at)})` : `sırada (${sinceText(j.at)})`}</div></div>
+        <div class="small muted">${esc(j.by || '?')} istedi · ${isRun ? (w.state === 'limited' ? 'limit nedeniyle yarım kaldı' : `çalışıyor (${sinceText(w.at)})`) : `sırada (${sinceText(j.at)})`}</div></div>
       <a class="small" href="#/game/${encodeURIComponent(j.slug)}">aç →</a>
     </div>`;
   };
   const state = v ? `<span class="worker-pill ${v.cls}" title="${esc(v.long)}">${esc(v.short)}</span>` : '';
-  box.innerHTML = `<div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span>${state}</div>
+  const limitRow = w?.state === 'limited' ? `<div class="task-alert warn">⏸ <div><b>Claude kullanım limiti doldu.</b> ${jobs.length ? `${jobs.length} iş bekliyor` : 'Yeni işler bekleyecek'}; ${w.resetAt ? `<b>${esc(fmtTime(w.resetAt))}</b> civarında limit sıfırlanınca` : 'limit sıfırlanınca'} kaldığı yerden kendiliğinden devam edecek. Bu arada seçim yapmaya devam edebilirsiniz.</div></div>`
+    : w?.state === 'error' ? `<div class="task-alert bad">⚠️ <div><b>Son işte hata oldu.</b> ${esc((w.message || '').slice(0, 200))} — 5 dk sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.</div></div>` : '';
+  box.innerHTML = `<div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span>${state}</div>${limitRow}
     ${jobs.length ? `<div class="tasks-list">${jobs.map(line).join('')}</div>
       <p class="small muted" style="margin:8px 0 0">İşler sırayla yapılır; bir araştırma ~15–30 dk sürer. Kağan'ın bilgisayarı kapalıysa açılınca devam eder.</p>`
     : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, Claude yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace('Son is bitti', 'Son biten iş')) : ''}</p>`}`;
@@ -1085,7 +1087,20 @@ function parseActivity(c) {
   const m = /^\[([^\]]+)\]\s*(.*)$/.exec(c.msg);
   if (!m) return { who: 'Claude', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
   const who = m[1], rest = m[2];
-  if (who === 'Worker') return null; // durum kalp atışları akışı kirletmesin
+  if (who === 'Worker') {
+    // "[Worker] durum: <state> | <mesaj> | job=<iş> | reset=<iso>" → anlamlı satır; eski biçim (sadece state) atlanır
+    const d = /^durum: (\w+)(.*)$/.exec(rest);
+    if (!d) return { who: 'Claude (worker)', icon: '🤖', text: rest.replace(/^[^:]+: /, ''), title: (/^([^:]+):/.exec(rest) || [])[1], game: null, at: c.at };
+    const parts = Object.fromEntries(d[2].split(' | ').slice(1).filter((p) => p.includes('=')).map((p) => [p.split('=')[0], p.slice(p.indexOf('=') + 1)]));
+    const job = parts.job ? jobName(parts.job) : '';
+    const slug = (/^\d{8}T\d{6}-[a-z_]+-(.+)$/.exec(parts.job || '') || [])[1] || null;
+    const base = { who: 'Claude (worker)', at: c.at, game: slug, title: slug ? S.games.get(slug)?.title : null };
+    if (d[1] === 'running') return parts.job ? { ...base, icon: '▶', text: `işe başladı: ${job}` } : null;
+    if (d[1] === 'idle') return d[2].includes('Son is bitti') ? { ...base, icon: '✅', text: 'işi bitirdi' + (/kuyrukta (\d+)/.exec(d[2]) ? ` (sırada ${/kuyrukta (\d+)/.exec(d[2])[1]} iş var)` : '') } : null;
+    if (d[1] === 'limited') return { ...base, icon: '⏸', alert: 'warn', text: `Claude kullanım limiti doldu${job ? `, "${job}" yarım kaldı` : ''}. ${parts.reset ? `${fmtTime(parts.reset)} civarında kendiliğinden devam edecek.` : 'Limit sıfırlanınca devam edecek.'}` };
+    if (d[1] === 'error') return { ...base, icon: '⚠️', alert: 'bad', text: `hata oldu${job ? ` (${job})` : ''}: ${d[2].split(' | ')[1] || ''}`.slice(0, 220) };
+    return null;
+  }
   if (/^iş kuyruğu: /.test(rest)) {
     const [, type, slug] = /^iş kuyruğu: (\S+) (\S+)/.exec(rest) || [];
     return { who, icon: '📥', text: `${S.games.get(slug)?.title || slug} için ${JOB_LABEL[type] || type} işini kuyruğa ekledi`, game: slug, at: c.at };
@@ -1114,7 +1129,7 @@ async function renderActivity() {
   const showSystem = S.showSystemActivity;
   const rows = grouped.filter((g) => showSystem || !g.system).slice(0, 40);
   box.innerHTML = rows.length ? rows.map((g) => `
-    <div class="act">
+    <div class="act ${g.alert ? 'alert ' + g.alert : ''}">
       <span class="act-icon">${g.icon}</span>
       <div style="min-width:0">
         <div><b>${esc(g.who)}</b>${g.title ? ` · ${g.game ? `<a href="#/game/${encodeURIComponent(g.game)}">${esc(g.title)}</a>` : esc(g.title)}` : ''}</div>

@@ -280,3 +280,11 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .canon-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); max-height: 60vh; overflow: auto; }
 
 .btn[hidden] { display: none; }
+
+/* Limit / hata uyarıları (iş listesi + etkinlik) */
+.task-alert { display: flex; gap: 10px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+.task-alert.warn { background: color-mix(in srgb, var(--warn) 14%, var(--surface-2)); border: 1px solid var(--warn); }
+.task-alert.bad { background: color-mix(in srgb, var(--bad) 14%, var(--surface-2)); border: 1px solid var(--bad); }
+.act.alert { border-radius: 8px; padding: 10px 8px; margin: 4px 0; }
+.act.alert.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.act.alert.bad { background: color-mix(in srgb, var(--bad) 12%, transparent); }
