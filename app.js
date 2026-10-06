@@ -359,8 +359,9 @@ async function renderHome() {
   app.innerHTML = `
     <div class="home-layout">
     <aside class="activity-panel">
-      <div class="row"><h2>🕘 Son etkinlikler</h2><span class="spacer"></span>
-        <label class="small muted" title="Claude'un sistem/site güncellemelerini de göster"><input type="checkbox" id="sysAct" ${S.showSystemActivity ? 'checked' : ''}> sistem</label></div>
+      <div class="row"><h2>🕘 Son etkinlikler</h2></div>
+      <div class="act-filters" id="actWho"></div>
+      <select id="actGame" class="act-game"></select>
       <div id="activity" class="activity"><span class="spinner"></span></div>
     </aside>
     <div class="home-main">
@@ -399,7 +400,7 @@ async function renderHome() {
   const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
   renderTaskList();
   renderActivity();
-  $('#sysAct').onchange = (e) => { S.showSystemActivity = e.target.checked; renderActivity(); };
+
   $('#newGame').onsubmit = async (e) => {
     e.preventDefault();
     const title = $('#newGameName').value.trim();
@@ -1099,7 +1100,7 @@ async function renderTaskList() {
 
 /* ---------- etkinlik akışı (sol panel) ---------- */
 function humanizeAction(t) {
-  return t.split(', ').map((p) => {
+  return [...new Set([...new Set(t.split(', '))].map((p) => {
     let m;
     if ((m = /^s(\d+) → ([a-z]+)$/i.exec(p))) return `S${m[1]} için ${m[2].toUpperCase()} seçeneğini seçti`;
     if ((m = /^s(\d+) → boş$/i.exec(p))) return `S${m[1]} seçimini kaldırdı`;
@@ -1110,13 +1111,14 @@ function humanizeAction(t) {
     if ((m = /^materyal (✓|✗) (.+)$/.exec(p))) return `${m[2]} materyalini ${m[1] === '✓' ? 'tamamladı' : 'geri aldı'}`;
     if ((m = /^altyazı: (\w+)$/.exec(p))) return `altyazıyı "${(CAPTIONS.find((c) => c.v === m[1]) || {}).label || m[1]}" yaptı`;
     return p;
-  }).join(', ');
+  }))].join(', ');
 }
 function parseActivity(c) {
   const m = /^\[([^\]]+)\]\s*(.*)$/.exec(c.msg);
   if (!m) return { who: 'Claude (geliştirme)', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
-  const who = /^Claude( \(worker\))?$|^Worker$/.test(m[1]) ? WORKER_NAME : m[1], rest = m[2];
-  if (who === 'Worker') {
+  const isWorker = /^Claude( \(worker\))?$|^Worker$|^Askeri Ücretli Çalışan$/.test(m[1]);
+  const who = isWorker ? WORKER_NAME : m[1], rest = m[2];
+  if (isWorker && /^durum: /.test(rest)) {
     // "[Worker] durum: <state> | <mesaj> | job=<iş> | reset=<iso>" → anlamlı satır; eski biçim (sadece state) atlanır
     const d = /^durum: (\w+)(.*)$/.exec(rest);
     if (!d) return { who: WORKER_NAME, icon: '🤖', text: rest.replace(/^[^:]+: /, ''), title: (/^([^:]+):/.exec(rest) || [])[1], game: null, at: c.at };
@@ -1155,8 +1157,15 @@ async function renderActivity() {
         Math.abs(new Date(last.at) - new Date(it.at)) < 15 * 60000 && last.texts.length < 6) { last.texts.push(it.text); continue; }
     grouped.push({ ...it, texts: [it.text] });
   }
-  const showSystem = S.showSystemActivity;
-  const rows = grouped.filter((g) => showSystem || !g.system).slice(0, 40);
+  // Filtreler (tarayıcıda hatırlanır): kişi + oyun
+  const fw = ls.get('studio.actWho', 'all'), fg = ls.get('studio.actGame', 'all');
+  const people = [...S.members, WORKER_NAME];
+  const chip = (v, label) => `<button type="button" class="chip-btn ${fw === v ? 'on' : ''}" data-who="${esc(v)}">${esc(label)}</button>`;
+  $('#actWho').innerHTML = chip('all', 'Hepsi') + people.map((p) => chip(p, p === WORKER_NAME ? '🤖 Çalışan' : p)).join('') + chip('system', '🛠 Sistem');
+  $('#actGame').innerHTML = `<option value="all">Tüm oyunlar</option>` + [...S.games.values()].map((x) => `<option value="${esc(x.slug)}" ${fg === x.slug ? 'selected' : ''}>${esc(x.title)}</option>`).join('');
+  document.querySelectorAll('#actWho .chip-btn').forEach((b) => b.onclick = () => { ls.set('studio.actWho', b.dataset.who); renderActivity(); });
+  $('#actGame').onchange = (e) => { ls.set('studio.actGame', e.target.value); renderActivity(); };
+  const rows = grouped.filter((g) => (fw === 'system' ? g.system : !g.system && (fw === 'all' || g.who === fw)) && (fg === 'all' || g.game === fg)).slice(0, 60);
   box.innerHTML = rows.length ? rows.map((g) => `
     <div class="act ${g.alert ? 'alert ' + g.alert : ''}">
       <span class="act-icon">${g.icon}</span>

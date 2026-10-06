@@ -297,3 +297,9 @@ body:has(.footer-bar) .ver-badge { bottom: 76px; }
 button.at-chip { border: 0; cursor: pointer; color: var(--text); font-family: inherit; }
 button.at-chip:hover { outline: 1px solid var(--accent); }
 .at-input { font-size: 12.5px; padding: 3px 8px; min-width: 260px; }
+
+/* Etkinlik filtreleri */
+.act-filters { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0 6px; }
+.chip-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); border-radius: 99px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.chip-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.act-game { width: 100%; font-size: 13px; padding: 5px 8px; margin-bottom: 4px; }
