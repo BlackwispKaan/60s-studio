@@ -1,0 +1,27 @@
+{
+ "v": 18,
+ "at": "2026-10-06T00:45:03+00:00",
+ "msg": "Sürüm rozeti + yeni sürüm uyarısı; worker'ın adı Askeri Ücretli Çalışan",
+ "history": [
+  {
+   "v": 18,
+   "at": "2026-10-06T00:45:03+00:00",
+   "msg": "Sürüm rozeti + yeni sürüm uyarısı; worker'ın adı Askeri Ücretli Çalışan"
+  },
+  {
+   "v": 17,
+   "at": "2026-10-06T00:30:00+00:00",
+   "msg": "Limit/hata takibi: etkinlik akışı ve iş listesi"
+  },
+  {
+   "v": 16,
+   "at": "2026-10-06T00:00:00+00:00",
+   "msg": "Meme Kanonu galerisi, çapraz aday seçimi"
+  },
+  {
+   "v": 15,
+   "at": "2026-10-05T21:10:00+00:00",
+   "msg": "Ana sayfa: Son etkinlikler paneli"
+  }
+ ]
+}

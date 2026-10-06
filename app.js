@@ -3,6 +3,7 @@
    localhost'ta token yoksa "demo modu": dosyaları yerel sunucudan okur, yazmaz. */
 
 const REPO = { owner: 'BlackwispKaan', repo: 'Youtube', branch: 'main' };
+const WORKER_NAME = 'Askeri Ücretli Çalışan'; // arka plan Claude'un ekipteki adı
 const DEFAULT_MEMBERS = ['Kağan', 'Samet', 'Yiğit'];
 const WORDS_PER_SEC = 2.6; // ~155 kelime/dk anlatım hızı
 
@@ -215,12 +216,12 @@ function buildMaterials(g) {
       if (x.candidates?.length) {
         // Meme/sfx adaylarını Claude indirdi; ekip sadece seçer. Seçilmezse ilk aday kullanılır.
         if (x.chosen === 'custom' && x.custom?.url) {
-          out.push({ ...base, auto: true, chosen: 'custom', chosenTitle: `Kendi linki: ${x.custom.url}${x.custom.note ? ` (${x.custom.note})` : ''}`, customUrl: x.custom.url, chosenExplicit: true, done: true, doneBy: 'Claude' });
+          out.push({ ...base, auto: true, chosen: 'custom', chosenTitle: `Kendi linki: ${x.custom.url}${x.custom.note ? ` (${x.custom.note})` : ''}`, customUrl: x.custom.url, chosenExplicit: true, done: true, doneBy: WORKER_NAME });
           seen.add(base.file);
           return;
         }
         const c = x.candidates.find((k) => k.id === x.chosen) || x.candidates[0];
-        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen && x.chosen !== 'custom', done: true, doneBy: 'Claude' });
+        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen && x.chosen !== 'custom', done: true, doneBy: WORKER_NAME });
         seen.add(base.file);
       } else add(base);
     });
@@ -257,10 +258,10 @@ ${by('meme').map(line).join('\n') || '- (yok)'}
 ## 🔊 Ses efektleri (${by('sfx').length})
 ${by('sfx').map(line).join('\n') || '- (yok)'}
 
-## 🤖 Claude'un hazırladıkları (sizin bir şey yapmanız gerekmez) (${autos.length})
+## 🤖 ${WORKER_NAME}'ın hazırladıkları (sizin bir şey yapmanız gerekmez) (${autos.length})
 ${autos.map((m) => `- **${m.section}** ${TYPE_LABEL[m.type]}: ${m.chosenTitle}${m.chosenExplicit ? '' : ' _(seçim yapılmadı, ilk aday)_'} → \`${m.file}\``).join('\n') || '- (yok)'}
 
-## 🎙️ Anlatıcı (ElevenLabs — Claude API ile otomatik üretir, sizin bir şey yapmanız gerekmez)
+## 🎙️ Anlatıcı (ElevenLabs — ${WORKER_NAME} API ile otomatik üretir, sizin bir şey yapmanız gerekmez)
 \`\`\`
 ${narrationScript(g)}
 \`\`\`
@@ -349,7 +350,7 @@ async function renderHome() {
     <div class="home-main">
     <div class="hero">
       <h1>60 saniyede oyunlar</h1>
-      <p class="muted" style="margin:0">Yeni bir oyun yaz. Claude araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
+      <p class="muted" style="margin:0">Yeni bir oyun yaz. ${WORKER_NAME} araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
     </div>
     ${workerBanner()}
     ${S.store.demo ? '<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">⚠️ <b>Demo modu</b>: yerel dosyalar okunuyor, değişiklikler kaydedilmez. Kaydetmek için ⚙ ile token gir.</div>' : ''}
@@ -357,7 +358,7 @@ async function renderHome() {
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
       <button class="btn btn-primary" type="submit">+ Yeni oyun</button>
     </form>
-    <section class="card tasks" id="taskList"><div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
+    <section class="card tasks" id="taskList"><div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
     <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span><span class="spacer"></span>
       ${archivedCount ? `<button class="btn btn-ghost small" id="toggleArchive">${S.showArchived ? 'Arşivi gizle' : `Arşiv (${archivedCount})`}</button>` : ''}</div>
     ${games.length ? `<div class="game-grid">${games.map((g) => {
@@ -599,9 +600,9 @@ async function renderGame(slug) {
     ${pipelineHtml(g)}
     <div class="stack" style="margin-top:20px">
       ${workerBanner()}
-      ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? 'Claude araştırıyor…' : 'Claude araştırma yapacak'}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
-      ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>Claude yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
-      ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">Claude kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
+      ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? `${WORKER_NAME} araştırıyor…` : `${WORKER_NAME} araştırma yapacak`}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
+      ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>${WORKER_NAME} yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
+      ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
       ${g.status === 'collecting' || (g.materials || []).length ? materialsHtml(g) : ''}
@@ -888,7 +889,7 @@ function bindGame(g0) {
   if (start) start.onclick = async () => {
     const missing = g.materials.filter((m) => !m.done).length;
     if (!g.settings.mediaFolderUrl && !confirm('Google Drive klasör linki girilmedi. Yine de başlansın mı?')) return;
-    if (missing && !confirm(`${missing} materyal henüz işaretlenmedi. Eksiklerle başlansın mı? (Claude eksikleri kendisi tamamlamaya çalışır)`)) return;
+    if (missing && !confirm(`${missing} materyal henüz işaretlenmedi. Eksiklerle başlansın mı? (${WORKER_NAME} eksikleri kendisi tamamlamaya çalışır)`)) return;
     start.disabled = true;
     try {
       await flush(slug);
@@ -960,7 +961,7 @@ async function renderIntegrations() {
   app.innerHTML = `
     <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
     <h1 style="margin:8px 0 6px">Entegrasyonlar</h1>
-    <p class="muted" style="margin:0 0 20px">API anahtarları tarayıcıda şifrelenir; sadece Kağan'ın bilgisayarındaki Claude çözebilir. Kaydedilen anahtar burada bir daha gösterilmez, sadece değiştirilebilir.</p>
+    <p class="muted" style="margin:0 0 20px">API anahtarları tarayıcıda şifrelenir; sadece Kağan'ın bilgisayarındaki ${WORKER_NAME} çözebilir. Kaydedilen anahtar burada bir daha gösterilmez, sadece değiştirilebilir.</p>
     <section class="card stack">
       <div class="row"><h2>🎙️ ElevenLabs</h2><span class="spacer"></span>
         <span class="pill dot ${el.apiKeyEnc ? 'st-done' : 'st-queued_edit'}">${el.apiKeyEnc ? `Anahtar ayarlı · ${esc(el.apiKeySetBy)} · ${fmtDate(el.apiKeySetAt)}` : 'Anahtar yok'}</span></div>
@@ -1012,10 +1013,10 @@ function workerView(w0) {
   const w = { ...w0, job: jobName(w0.job) };
   const ageH = (Date.now() - new Date(w.at).getTime()) / 36e5;
   if (w.state === 'running' && ageH > 3) return { cls: 'warn', short: '⚠️ Worker yanıt vermiyor', long: `Son durum ${fmtTime(w.at)}: "${w.job}" çalışıyordu ama 3 saattir haber yok. Kağan'ın bilgisayarı kapanmış olabilir; açılınca iş devam eder.` };
-  if (w.state === 'running') return { cls: 'run', short: '🟢 Claude çalışıyor', long: `Arka planda Claude şu işi yapıyor: ${w.job}` };
+  if (w.state === 'running') return { cls: 'run', short: '🟢 Çalışıyor', long: `${WORKER_NAME} şu işi yapıyor: ${w.job}` };
   if (w.state === 'limited') {
     const reset = w.resetAt ? fmtTime(w.resetAt) : 'bilinmiyor';
-    return { cls: 'warn', short: `⏸ Limit doldu · ${reset}`, long: `Claude kullanım limiti doldu, "${w.job}" yarım kaldı. ${reset} civarında limit sıfırlanınca kaldığı yerden otomatik devam edecek. (${w.message})`, banner: true };
+    return { cls: 'warn', short: `⏸ Limit doldu · ${reset}`, long: `${WORKER_NAME}'ın Claude kullanım limiti doldu, "${w.job}" yarım kaldı. ${reset} civarında limit sıfırlanınca kaldığı yerden otomatik devam edecek. (${w.message})`, banner: true };
   }
   if (w.state === 'error') return { cls: 'bad', short: '⚠️ Worker hatası', long: `"${w.job || ''}" işinde hata oldu: ${w.message}. Kuyruktaki iş 5 dakika sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.`, banner: true };
   return { cls: 'idle', short: '● Boşta', long: `Worker boşta. ${w.message || ''} (${fmtTime(w.at)})` };
@@ -1026,7 +1027,7 @@ async function loadWorkerStatus() {
   if (!el) return;
   if (!v) { el.hidden = true; return; }
   el.hidden = false; el.className = `worker-pill ${v.cls}`; el.textContent = v.short; el.title = v.long;
-  el.onclick = () => openModal(`<h2>Arka plan Claude</h2><p>${esc(v.long)}</p><p class="small muted">Son güncelleme: ${fmtDate(S.worker.at)}</p>`);
+  el.onclick = () => openModal(`<h2>${WORKER_NAME}</h2><p>${esc(v.long)}</p><p class="small muted">Son güncelleme: ${fmtDate(S.worker.at)}</p>`);
 }
 function workerBanner() {
   const v = workerView(S.worker);
@@ -1060,12 +1061,12 @@ async function renderTaskList() {
     </div>`;
   };
   const state = v ? `<span class="worker-pill ${v.cls}" title="${esc(v.long)}">${esc(v.short)}</span>` : '';
-  const limitRow = w?.state === 'limited' ? `<div class="task-alert warn">⏸ <div><b>Claude kullanım limiti doldu.</b> ${jobs.length ? `${jobs.length} iş bekliyor` : 'Yeni işler bekleyecek'}; ${w.resetAt ? `<b>${esc(fmtTime(w.resetAt))}</b> civarında limit sıfırlanınca` : 'limit sıfırlanınca'} kaldığı yerden kendiliğinden devam edecek. Bu arada seçim yapmaya devam edebilirsiniz.</div></div>`
+  const limitRow = w?.state === 'limited' ? `<div class="task-alert warn">⏸ <div><b>${WORKER_NAME}'ın Claude kullanım limiti doldu.</b> ${jobs.length ? `${jobs.length} iş bekliyor` : 'Yeni işler bekleyecek'}; ${w.resetAt ? `<b>${esc(fmtTime(w.resetAt))}</b> civarında limit sıfırlanınca` : 'limit sıfırlanınca'} kaldığı yerden kendiliğinden devam edecek. Bu arada seçim yapmaya devam edebilirsiniz.</div></div>`
     : w?.state === 'error' ? `<div class="task-alert bad">⚠️ <div><b>Son işte hata oldu.</b> ${esc((w.message || '').slice(0, 200))} — 5 dk sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.</div></div>` : '';
-  box.innerHTML = `<div class="row"><h2>🗂️ Claude'un iş listesi</h2><span class="spacer"></span>${state}</div>${limitRow}
+  box.innerHTML = `<div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span>${state}</div>${limitRow}
     ${jobs.length ? `<div class="tasks-list">${jobs.map(line).join('')}</div>
       <p class="small muted" style="margin:8px 0 0">İşler sırayla yapılır; bir araştırma ~15–30 dk sürer. Kağan'ın bilgisayarı kapalıysa açılınca devam eder.</p>`
-    : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, Claude yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace('Son is bitti', 'Son biten iş')) : ''}</p>`}`;
+    : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, ${WORKER_NAME} yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace(/Son is bitti: (\S+)/, (_, j) => `Son biten iş: ${jobName(j)}`).replace(/kuyrukta (\d+) is var/, 'kuyrukta $1 iş var')) : ''}</p>`}`;
 }
 
 /* ---------- etkinlik akışı (sol panel) ---------- */
@@ -1085,16 +1086,16 @@ function humanizeAction(t) {
 }
 function parseActivity(c) {
   const m = /^\[([^\]]+)\]\s*(.*)$/.exec(c.msg);
-  if (!m) return { who: 'Claude', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
-  const who = m[1], rest = m[2];
+  if (!m) return { who: 'Claude (geliştirme)', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
+  const who = /^Claude( \(worker\))?$|^Worker$/.test(m[1]) ? WORKER_NAME : m[1], rest = m[2];
   if (who === 'Worker') {
     // "[Worker] durum: <state> | <mesaj> | job=<iş> | reset=<iso>" → anlamlı satır; eski biçim (sadece state) atlanır
     const d = /^durum: (\w+)(.*)$/.exec(rest);
-    if (!d) return { who: 'Claude (worker)', icon: '🤖', text: rest.replace(/^[^:]+: /, ''), title: (/^([^:]+):/.exec(rest) || [])[1], game: null, at: c.at };
+    if (!d) return { who: WORKER_NAME, icon: '🤖', text: rest.replace(/^[^:]+: /, ''), title: (/^([^:]+):/.exec(rest) || [])[1], game: null, at: c.at };
     const parts = Object.fromEntries(d[2].split(' | ').slice(1).filter((p) => p.includes('=')).map((p) => [p.split('=')[0], p.slice(p.indexOf('=') + 1)]));
     const job = parts.job ? jobName(parts.job) : '';
     const slug = (/^\d{8}T\d{6}-[a-z_]+-(.+)$/.exec(parts.job || '') || [])[1] || null;
-    const base = { who: 'Claude (worker)', at: c.at, game: slug, title: slug ? S.games.get(slug)?.title : null };
+    const base = { who: WORKER_NAME, at: c.at, game: slug, title: slug ? S.games.get(slug)?.title : null };
     if (d[1] === 'running') return parts.job ? { ...base, icon: '▶', text: `işe başladı: ${job}` } : null;
     if (d[1] === 'idle') return d[2].includes('Son is bitti') ? { ...base, icon: '✅', text: 'işi bitirdi' + (/kuyrukta (\d+)/.exec(d[2]) ? ` (sırada ${/kuyrukta (\d+)/.exec(d[2])[1]} iş var)` : '') } : null;
     if (d[1] === 'limited') return { ...base, icon: '⏸', alert: 'warn', text: `Claude kullanım limiti doldu${job ? `, "${job}" yarım kaldı` : ''}. ${parts.reset ? `${fmtTime(parts.reset)} civarında kendiliğinden devam edecek.` : 'Limit sıfırlanınca devam edecek.'}` };
@@ -1108,10 +1109,10 @@ function parseActivity(c) {
   const ng = /^Yeni oyun: (.+)$/.exec(rest);
   if (ng) { const sl = slugify(ng[1]); return { who, icon: '🆕', text: 'yeni oyun ekledi', title: S.games.get(sl)?.title || ng[1], game: S.games.has(sl) ? sl : null, at: c.at }; }
   const g = /^([^:]+): (.*)$/.exec(rest);
-  if (!g) return { who, icon: who === 'Claude' ? '🤖' : '✏️', text: rest, game: null, at: c.at };
+  if (!g) return { who, icon: who === WORKER_NAME ? '🤖' : '✏️', text: rest, game: null, at: c.at };
   const raw = g[1].trim(), found = [...S.games.values()].find((x) => x.title === raw || x.slug === raw.toLowerCase());
   const slug = found?.slug || null, title = found?.title || raw;
-  const icon = who === 'Claude' ? '🤖' : /çıktı|başlatıldı|onaylandı|düzeltme/i.test(g[2]) ? '🚦' : '✏️';
+  const icon = who === WORKER_NAME ? '🤖' : /çıktı|başlatıldı|onaylandı|düzeltme/i.test(g[2]) ? '🚦' : '✏️';
   return { who, icon, text: humanizeAction(g[2]), title, game: slug, at: c.at };
 }
 async function renderActivity() {
@@ -1137,6 +1138,22 @@ async function renderActivity() {
         <div class="small muted">${sinceText(g.at)} önce · ${fmtDate(g.at)}</div>
       </div>
     </div>`).join('') : '<p class="small muted">Henüz etkinlik yok.</p>';
+}
+
+/* ---------- sürüm rozeti + yeni sürüm uyarısı ---------- */
+const APP_V = +((document.querySelector('script[src*="app.js"]')?.getAttribute('src') || '').match(/v=(\d+)/) || [])[1] || 0;
+async function checkVersion() {
+  let info;
+  try { info = await (await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' })).json(); } catch { return; }
+  const badge = $('#verBadge');
+  const mine = (info.history || []).find((h) => h.v === APP_V) || info;
+  badge.hidden = false;
+  badge.textContent = `Sürüm ${APP_V || '?'} · ${fmtDate(mine.at)}`;
+  badge.onclick = () => openModal(`<h2>Sürüm geçmişi</h2>
+    <p class="small muted" style="margin-top:0">Açık olan: <b>${APP_V}</b> · Yayındaki son: <b>${info.v}</b></p>
+    <div class="log">${(info.history || []).map((h) => `<div class="act"><span class="act-icon">${h.v === APP_V ? '●' : ''}</span><div><b>v${h.v}</b> · ${fmtDate(h.at)}<div class="act-text">${esc(h.msg)}</div></div></div>`).join('')}</div>`);
+  const nb = $('#newVersion');
+  if (info.v > APP_V) { nb.hidden = false; nb.innerHTML = `🆕 Yeni sürüm var (v${info.v}): ${esc(info.msg)} <button class="btn btn-primary small" onclick="location.reload()">Yenile</button>`; }
 }
 
 /* ---------- router / boot ---------- */
@@ -1168,6 +1185,7 @@ async function boot() {
 }
 
 applyTheme();
+checkVersion(); setInterval(checkVersion, 5 * 60 * 1000);
 $('#settingsBtn').onclick = () => settingsModal();
 $('#modalClose').onclick = closeModal;
 $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
