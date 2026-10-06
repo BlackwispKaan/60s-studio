@@ -501,7 +501,7 @@ function customCandHtml(sec, o, n) {
 
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Anlatımın hangi kelimesinde/anında girsin? (boşsa Askeri Ücretli Çalışan seçer)">⏱ ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'an ekle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
+  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
     ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}
     ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎 Alakasız'}</button>` : ''}</div>
     ${n.why ? `<div class="need-why">💡 <b>Neden komik:</b> ${esc(n.why)}</div>` : ''}
@@ -804,7 +804,7 @@ function bindGame(g0) {
     const save = () => {
       const v = inp.value.trim();
       queueOp(slug, (x) => { findNeed(x, sid, oid, file).at = v; }, `${file} anı`);
-      chip.textContent = v ? `⏱ “${v}”` : '⏱ an ekle'; inp.replaceWith(chip);
+      chip.textContent = v ? `⏱ giriş anı: “${v}”` : '⏱ giriş anı: otomatik · belirle'; inp.replaceWith(chip);
     };
     inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.replaceWith(chip); } };
     inp.onblur = save;
