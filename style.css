@@ -332,8 +332,8 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .at-words .w.on { background: var(--accent); color: #141414; border-color: var(--accent); }
 /* Seçim yapılmış bölümde diğer seçenekler katlanır */
 .peek-btn { display: none; margin-top: 6px; }
-.has-sel .opt:not(.selected) .peek-btn { display: inline-block; }
-.has-sel .opt:not(.selected):not(.peek) .opt-meta { display: none; }
+.opt:not(.selected) .peek-btn { display: inline-block; }
+.opt:not(.selected):not(.peek) .opt-meta { display: none; }
 .has-sel .opt:not(.selected) { opacity: .8; }
 .has-sel .opt:not(.selected):hover, .has-sel .opt.peek { opacity: 1; }
 /* Alt bar bölüm kısayolları */
@@ -380,7 +380,7 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .opt-desc dt { color: var(--muted); font-weight: 600; }
 .opt-desc dd { margin: 0; }
 @media (max-width: 600px) { .opt-desc { grid-template-columns: 1fr; } .opt-desc dd { margin-bottom: 4px; } }
-.has-sel .opt:not(.selected):not(.peek) .opt-meta { display: none; }
+.opt:not(.selected):not(.peek) .opt-meta { display: none; }  /* seçilmeyen seçenek baştan katlı (mobil) */
 .role { margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .need-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13.5px; }
 .need-desc { font-weight: 600; }

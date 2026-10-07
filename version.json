@@ -1,8 +1,13 @@
 {
- "v": 39,
- "at": "2026-10-07T07:42:19+00:00",
- "msg": "Ekranda satırı seçimlerden canlı üretilir; Ses satırı kaldırıldı",
+ "v": 40,
+ "at": "2026-10-07T08:38:44+00:00",
+ "msg": "Seçenek ayrıntıları seçilene kadar katlı (mobilde kısa kaydırma)",
  "history": [
+  {
+   "v": 40,
+   "at": "2026-10-07T08:38:44+00:00",
+   "msg": "Seçenek ayrıntıları seçilene kadar katlı (mobilde kısa kaydırma)"
+  },
   {
    "v": 39,
    "at": "2026-10-07T07:42:19+00:00",
@@ -97,11 +102,6 @@
    "v": 21,
    "at": "2026-10-06T16:01:12+00:00",
    "msg": "Etkinlik paneline kişi ve oyun filtreleri; Askeri Ücretli Çalışan satırları düzeltildi"
-  },
-  {
-   "v": 20,
-   "at": "2026-10-06T15:40:19+00:00",
-   "msg": "Token alanı: Göster / Kopyala + karakter sayısı kontrolü"
   }
  ]
 }
