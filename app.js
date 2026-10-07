@@ -489,13 +489,15 @@ function candidatesHtml(slug, sec, o, n) {
         <a class="small muted" href="${esc(c.page)}" target="_blank" rel="noopener">kaynak ↗</a>
       </div>
     </div>`;
-  }).join('')}${n.optional ? noneCandHtml(sec, o, n) : ''}${customCandHtml(sec, o, n)}</div>`;
+  }).join('')}${isOptional(n) ? noneCandHtml(sec, o, n) : ''}${customCandHtml(sec, o, n)}</div>`;
 }
+// Bindirme de ara klip de isteğe bağlı: sadece biri, ikisi ya da hiçbiri seçilebilir
+const isOptional = (n) => !!(n.optional || n.role === 'overlay' || n.role === 'cutaway');
 function noneCandHtml(sec, o, n) {
   const on = n.chosen === 'none';
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
   return `<div class="cand none ${on ? 'chosen' : ''}" data-cand="none">
-    <div class="cand-media custom-media"><span>🚫</span><b>Kullanma</b><small>bu bölümde ara klip yok</small></div>
+    <div class="cand-media custom-media"><span>🚫</span><b>Kullanma</b><small>${n.role === 'overlay' ? 'bindirme yok' : 'ara klip yok'}</small></div>
     <div class="cand-actions"><button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${key}|none">${on ? '✓ Seçildi' : 'Seç'}</button></div>
   </div>`;
 }
@@ -528,7 +530,7 @@ function needHtml(slug, sec, o, n) {
 
 // Örnek videolara göre (SAMPLE_BREAKDOWN): oyun üstü bindirme (≤1) + opsiyonel ara klip (≤1) + ses efekti
 const ROLE_HEAD = {
-  overlay: ['🟩 Oyun ekranına bindirme', 'Oyun görüntüsü durmadan üstüne konur.'],
+  overlay: ['🟩 Oyun ekranına bindirme (opsiyonel)', 'Oyun görüntüsü durmadan üstüne konur.'],
   cutaway: ['🎬 Ara klip (opsiyonel)', ' Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
   sfx: ['🔊 Ses efekti', ''],
   meme: ['🎬 Meme', ''],
@@ -818,7 +820,7 @@ function bindGame(g0) {
     const [sid, oid, file, cid] = b.dataset.pick.split('|');
     const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
     const nd = find(g);
-    const val = nd.chosen === cid ? (nd.optional ? 'none' : null) : cid;
+    const val = nd.chosen === cid ? (isOptional(nd) ? 'none' : null) : cid;
     queueOp(slug, (x) => { find(x).chosen = val; }, `${file} → ${val || 'boş'}`);
     const box = b.closest('.cands');
     box.querySelectorAll('.cand').forEach((c) => {

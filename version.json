@@ -1,8 +1,13 @@
 {
- "v": 31,
- "at": "2026-10-07T03:20:21+00:00",
- "msg": "Tekrar eden açıklamalar kaldırıldı (üzerine gelince ipucu)",
+ "v": 32,
+ "at": "2026-10-07T03:49:06+00:00",
+ "msg": "Bindirme de opsiyonel: Kullanma seçeneği (sadece ara klip / sadece bindirme / ikisi / hiçbiri)",
  "history": [
+  {
+   "v": 32,
+   "at": "2026-10-07T03:49:06+00:00",
+   "msg": "Bindirme de opsiyonel: Kullanma seçeneği (sadece ara klip / sadece bindirme / ikisi / hiçbiri)"
+  },
   {
    "v": 31,
    "at": "2026-10-07T03:20:21+00:00",
