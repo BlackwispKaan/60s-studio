@@ -529,11 +529,13 @@ function optionHtml(sec, o, slug) {
   </div>`;
 }
 
-function sectionHtml(sec, i, editable, opening, slug) {
-  return `<section class="card ${sec.selected ? 'has-sel' : ''}" id="sec-${esc(sec.id)}">
+function sectionHtml(sec, i, editable, opening, slug, g) {
+  const collecting = g?.status === 'collecting';
+  return `<section class="card ${sec.selected ? 'has-sel' : ''} ${collecting ? 'collecting' : ''}" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
     <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
     ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
+    ${collecting ? secMaterialsHtml(g, i) + `<button type="button" class="btn small reopen-btn">✏️ Seçimi değiştir</button>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
     <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
     <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="${sec.regen ? 'Yeni tema / istek: ör. “Pauselock esprisi olsun, oyunu durdurup kaçan oyunculara gönderme”' : 'Bu bölüm için not / kendi fikrin (opsiyonel)'}" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
@@ -544,6 +546,30 @@ function sectionHtml(sec, i, editable, opening, slug) {
   </section>`;
 }
 
+// Materyal aşaması: üstte sadece ilerleme + Drive; her bölümün materyali kendi kartında (secMaterialsHtml)
+function materialsSummaryHtml(g) {
+  const mats = (g.materials || []).filter((m) => !m.auto);
+  const done = mats.filter((m) => m.done).length;
+  return `<section class="card" id="materials">
+    <div class="row"><h2>📦 Materyaller</h2><span class="pill">${done}/${mats.length} toplandı</span><span class="spacer"></span>
+      <button class="btn btn-ghost" id="showExport">Tüm listeyi göster / indir</button></div>
+    <div class="small muted" style="margin-top:10px">Her bölümün toplanacak görüntüleri aşağıda kendi kartında. Topladıkça kutuyu işaretleyin.
+      ${g.settings.mediaFolderUrl ? `Dosyaları listedeki adlarla bu klasöre yükleyin: ${driveLink(g)}` : 'Drive klasörü henüz bağlı değil.'}
+      Bir bölümün seçimini değiştirmek isterseniz o bölümdeki <b>✏️ Seçimi değiştir</b>'e basın.</div>
+  </section>`;
+}
+function secMaterialsHtml(g, i) {
+  const mats = (g.materials || []).filter((m) => m.section === `S${i + 1}` && !m.auto);
+  if (!mats.length) return '';
+  return `<div class="sec-mats"><div class="sec-mats-head">📦 Bu bölüm için toplanacaklar</div>${mats.map((m) => `
+      <label class="mat ${m.done ? 'done' : ''}">
+        <input type="checkbox" data-mat="${esc(m.file || m.id)}" ${m.done ? 'checked' : ''}>
+        <div style="flex:1;min-width:0">
+          <div class="mat-desc">${esc(m.desc)}</div>
+          <div class="small muted"><code>${esc(m.file)}</code>${m.doneBy ? ` · ✓ ${esc(m.doneBy)}` : ''}</div>
+        </div>
+      </label>`).join('')}</div>`;
+}
 function materialsHtml(g) {
   const mats = g.materials || [];
   const done = mats.filter((m) => m.done).length;
@@ -618,7 +644,7 @@ async function renderGame(slug) {
       ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
-      ${g.status === 'collecting' || (g.materials || []).length ? materialsHtml(g) : ''}
+      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length ? materialsHtml(g) : ''}
       ${stale ? `<div class="card" style="border-color:var(--warn)">⚠️ Seçimler çıktıdan sonra değişti. Materyal listesini güncellemek için <b>Çıktı al</b>'a tekrar bas.</div>` : ''}
       ${g.sections?.length ? `
         <section class="card">
@@ -631,7 +657,7 @@ async function renderGame(slug) {
             <label class="chip small"><input type="checkbox" id="regenAll" ${g.regenAll ? 'checked' : ''} ${editable ? '' : 'disabled'}> Tüm videoyu buna göre yeniden öner</label></div>
           <textarea id="briefIn" class="note-input" rows="2" placeholder="Opsiyonel. Videonun genel havası veya mutlaka olmasını istediğiniz espri. Örn: “Pauselock meme'i ana espri olsun, final de ona bağlansın.”" ${editable ? '' : 'disabled'}>${esc(g.brief || '')}</textarea>
         </section>
-        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening, g.slug)).join('')}` : ''}
+        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening, g.slug, g)).join('')}` : ''}
       ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(l.by)}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
     </div>
     ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
@@ -839,6 +865,10 @@ function bindGame(g0) {
     box.querySelector('[data-act="auto"]').onclick = () => save('');
     box.querySelector('[data-act="close"]').onclick = () => box.remove();
     chip.closest('.need-head').after(box); paint();
+  });
+  document.querySelectorAll('.reopen-btn').forEach((b) => b.onclick = () => {
+    const sec = b.closest('section'); const on = sec.classList.toggle('reopen');
+    b.textContent = on ? '✓ Değiştirmeyi bitir' : '✏️ Seçimi değiştir';
   });
   document.querySelectorAll('.sec-dot').forEach((d) => d.onclick = () => document.getElementById('sec-' + d.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   document.querySelectorAll('.need-fb').forEach((b) => b.onclick = (ev) => {

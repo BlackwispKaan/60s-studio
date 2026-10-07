@@ -355,3 +355,12 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .beat { border-left: 3px solid var(--border); padding: 4px 0 4px 12px; margin: 8px 0 14px; }
 .opt.selected .beat { border-left-color: var(--accent); }
 .beat-no { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+
+/* Materyal aşaması: bölüm kartında materyaller; seçim kilitli değil ama katlı */
+.sec-mats { margin: 12px 0 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; }
+.sec-mats-head { font-weight: 700; margin-bottom: 6px; }
+.collecting .need-box { display: none; }
+.collecting.reopen .need-box { display: block; }
+.collecting:not(.reopen) .opt:not(.selected) { display: none; }
+.collecting:not(.reopen) .regen-btn, .collecting:not(.reopen) .note-input, .collecting:not(.reopen) .regen-btn + span { display: none; }
+.reopen-btn { margin-bottom: 8px; }
