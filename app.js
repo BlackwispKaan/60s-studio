@@ -522,14 +522,14 @@ function needHtml(slug, sec, o, n) {
     ${n.replaced ? `<div class="need-note">🔄 Değişti: <i>${esc(n.replaced.from)}</i> yerine${n.replaced.reason ? ` · sebep: ${esc(n.replaced.reason)}` : ''}</div>` : ''}
     ${n.feedback && !n.feedbackDone ? `<div class="need-note">👎 ${esc(n.feedback.by)}: “${esc(n.feedback.reason || 'alakasız')}” · alttan <b>Tekrar yap</b>'a basınca işlenir</div>` : ''}`;
   const label = n.role === 'cutaway' && n.label ? `<div class="cut-label"><span>${esc(n.label)}</span></div>` : '';
-  if (n.designed) return head + `<div class="designed">🎨 ${WORKER_NAME} hazırlar — seçim gerekmez.</div>`;
+  if (n.designed) return head + `<div class="designed" title="${WORKER_NAME} çizer, seçim gerekmez.">🎨 Hazır tasarım</div>`;
   return head + label + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
 }
 
 // Örnek videolara göre (SAMPLE_BREAKDOWN): oyun üstü bindirme (≤1) + opsiyonel ara klip (≤1) + ses efekti
 const ROLE_HEAD = {
   overlay: ['🟩 Oyun ekranına bindirme', 'Oyun görüntüsü durmadan üstüne konur.'],
-  cutaway: ['🎬 Ara klip', 'Opsiyonel. Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
+  cutaway: ['🎬 Ara klip (opsiyonel)', ' Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
   sfx: ['🔊 Ses efekti', ''],
   meme: ['🎬 Meme', ''],
 };
@@ -541,7 +541,7 @@ function roleBlocksHtml(slug, sec, o) {
     const list = needs.filter((n) => roleOf(n) === r);
     if (!list.length) return '';
     const [h, hint] = ROLE_HEAD[r];
-    return `<div class="role role-${r}"><div class="role-head">${h}${hint ? ` <span class="muted small">· ${hint}</span>` : ''}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}</div>`;
+    return `<div class="role role-${r}"><div class="role-head"${hint ? ` title="${esc(hint)}"` : ''}>${h}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}</div>`;
   }).join('');
 }
 function optionHtml(sec, o, slug) {
@@ -554,7 +554,7 @@ function optionHtml(sec, o, slug) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Seçim yapmak için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${roleBlocksHtml(slug, sec, o)}
+      <dt>Meme / ses</dt><dd>${roleBlocksHtml(slug, sec, o)}
         <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
       ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>

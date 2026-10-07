@@ -1,8 +1,13 @@
 {
- "v": 30,
- "at": "2026-10-07T03:09:47+00:00",
- "msg": "Vuruş kaldırıldı: Oyun ekranına bindirme + opsiyonel Ara klip (3 alternatif + Kullanma); alt barda ara klip sayacı",
+ "v": 31,
+ "at": "2026-10-07T03:20:21+00:00",
+ "msg": "Tekrar eden açıklamalar kaldırıldı (üzerine gelince ipucu)",
  "history": [
+  {
+   "v": 31,
+   "at": "2026-10-07T03:20:21+00:00",
+   "msg": "Tekrar eden açıklamalar kaldırıldı (üzerine gelince ipucu)"
+  },
   {
    "v": 30,
    "at": "2026-10-07T03:09:47+00:00",
