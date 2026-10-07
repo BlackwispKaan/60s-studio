@@ -517,6 +517,7 @@ function optionHtml(sec, o, slug) {
     <span class="radio"></span>
     <div class="opt-en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${esc(o.narration)}”</div>
     <div class="opt-tr">🇹🇷 ${esc(o.tr)}</div>
+    <button type="button" class="link-btn small peek-btn">▸ ayrıntıları göster</button>
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
@@ -529,7 +530,7 @@ function optionHtml(sec, o, slug) {
 }
 
 function sectionHtml(sec, i, editable, opening, slug) {
-  return `<section class="card" id="sec-${esc(sec.id)}">
+  return `<section class="card ${sec.selected ? 'has-sel' : ''}" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
     <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
     ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
@@ -635,7 +636,8 @@ async function renderGame(slug) {
     </div>
     ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
       <span class="stat"><b id="stChosen">${st.chosen}/${st.total}</b> <span class="small muted">bölüm</span></span>
-      <span class="stat"><b id="stSecs">~${st.secs}</b> <span class="small muted">sn anlatım</span></span>
+      <span class="stat"><b id="stSecs">≈${st.secs}</b> <span class="small muted">sn anlatım</span></span>
+      <span class="sec-nav">${g.sections.map((s, i) => `<button type="button" class="sec-dot ${s.selected ? 'done' : ''}" data-go="${esc(s.id)}" title="S${i + 1} · ${esc(s.title)}${s.selected ? ' · seçildi: ' + s.selected.toUpperCase() : ' · seçim yok'}">${i + 1}</button>`).join('')}</span>
       <span class="spacer"></span>
       <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
       ${g.status === 'collecting' ? `<button class="btn" id="startBtn">▶ Başla</button>` : ''}
@@ -730,7 +732,8 @@ function updateFooter(g) {
   const st = stats(g);
   const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
   const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
-  const s = $('#stSecs'); if (s) { s.textContent = `~${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
+  document.querySelectorAll('.sec-dot').forEach((d) => d.classList.toggle('done', !!g.sections.find((x) => x.id === d.dataset.go)?.selected));
+  const s = $('#stSecs'); if (s) { s.textContent = `≈${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
   const b = $('#exportBtn'); if (b) { b.disabled = st.chosen !== st.total; b.textContent = exportFresh(g) ? '📋 Çıktıyı göster' : 'Çıktı al'; }
 }
 
@@ -792,24 +795,52 @@ function bindGame(g0) {
       renderGame(slug);
     });
   });
+  // ⏱ Giriş anı: anlatımın kelimelerine tıklayarak seç (1. tık = kelime, 2. tık = aralık)
+  const atLabel = (v) => (v ? `⏱ giriş anı: “${v}”` : '⏱ giriş anı: otomatik · belirle');
+  const clean = (t) => t.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
   document.querySelectorAll('.at-chip').forEach((chip) => chip.onclick = (ev) => {
     ev.stopPropagation();
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    document.querySelectorAll('.at-picker').forEach((x) => x.remove());
     const [sid, oid, file] = chip.dataset.at.split('|');
-    const cur = findNeed(g, sid, oid, file).at || '';
-    const inp = document.createElement('input');
-    inp.type = 'text'; inp.className = 'at-input'; inp.value = cur.replace(/^"|"$/g, '');
-    inp.placeholder = 'örn. five-star wanted level (boş = otomatik)';
-    inp.onclick = (e) => e.stopPropagation();
-    const save = () => {
-      const v = inp.value.trim();
-      queueOp(slug, (x) => { findNeed(x, sid, oid, file).at = v; }, `${file} anı`);
-      chip.textContent = v ? `⏱ giriş anı: “${v}”` : '⏱ giriş anı: otomatik · belirle'; inp.replaceWith(chip);
+    const opt = g.sections.find((x) => x.id === sid).options.find((x) => x.id === oid);
+    const words = opt.narration.split(/\s+/).filter(Boolean);
+    const cur = clean((findNeed(g, sid, oid, file).at || '').replace(/"/g, '')).toLowerCase();
+    let a = -1, b = -1;
+    if (cur) {  // mevcut değer anlatımda geçiyorsa işaretle
+      const cw = cur.split(/\s+/);
+      for (let i = 0; i + cw.length <= words.length; i++) {
+        if (cw.every((w, k) => clean(words[i + k]).toLowerCase() === w)) { a = i; b = i + cw.length - 1; break; }
+      }
+    }
+    const box = document.createElement('div');
+    box.className = 'at-picker';
+    box.onclick = (e) => e.stopPropagation();
+    const paint = () => {
+      box.querySelectorAll('.w').forEach((w) => w.classList.toggle('on', a >= 0 && +w.dataset.i >= a && +w.dataset.i <= b));
+      box.querySelector('.at-prev').textContent = a >= 0 ? `“${clean(words.slice(a, b + 1).join(' '))}”` : 'otomatik (Askeri Ücretli Çalışan seçer)';
     };
-    inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.replaceWith(chip); } };
-    inp.onblur = save;
-    chip.replaceWith(inp); inp.focus();
+    box.innerHTML = `<div class="small muted">Meme anlatıcı hangi kelimeyi söylerken girsin? <b>Kelimeye tıkla</b>; birden fazla kelime için ikinci kelimeye de tıkla.</div>
+      <div class="at-words">${words.map((w, i) => `<button type="button" class="w" data-i="${i}">${esc(w)}</button>`).join('')}</div>
+      <div class="row small" style="margin-top:8px;gap:8px"><span>Seçim: <b class="at-prev"></b></span><span class="spacer"></span>
+        <button type="button" class="btn small" data-act="auto">Otomatik</button>
+        <button type="button" class="btn small" data-act="close">Vazgeç</button>
+        <button type="button" class="btn btn-primary small" data-act="save">✓ Kaydet</button></div>`;
+    box.querySelectorAll('.w').forEach((w) => w.onclick = () => {
+      const i = +w.dataset.i;
+      if (a >= 0 && a === b && i !== a) { a = Math.min(a, i); b = Math.max(b, i); } else { a = b = i; }
+      paint();
+    });
+    const save = (v) => {
+      queueOp(slug, (x) => { findNeed(x, sid, oid, file).at = v; }, `${file} anı`);
+      chip.textContent = atLabel(v); box.remove();
+    };
+    box.querySelector('[data-act="save"]').onclick = () => save(a >= 0 ? clean(words.slice(a, b + 1).join(' ')) : '');
+    box.querySelector('[data-act="auto"]').onclick = () => save('');
+    box.querySelector('[data-act="close"]').onclick = () => box.remove();
+    chip.closest('.need-head').after(box); paint();
   });
+  document.querySelectorAll('.sec-dot').forEach((d) => d.onclick = () => document.getElementById('sec-' + d.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   document.querySelectorAll('.need-fb').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
@@ -832,13 +863,16 @@ function bindGame(g0) {
   });
 
   document.querySelectorAll('.opt').forEach((btn) => btn.onclick = (ev) => {
-    if (ev.target.closest('.cands, .refs')) return;
+    if (ev.target.closest('.cands, .refs, .at-picker')) return;
+    if (ev.target.closest('.peek-btn')) { const on = btn.classList.toggle('peek'); ev.target.textContent = on ? '▾ ayrıntıları gizle' : '▸ ayrıntıları göster'; return; }
     if (!editable) return toast('Bu aşamada seçimler kilitli.');
     const sid = btn.dataset.sec, oid = btn.dataset.opt;
     const sec = g.sections.find((s) => s.id === sid);
     const val = sec.selected === oid ? null : oid;
     queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).selected = val; }, `${sid} → ${val || 'boş'}`);
     btn.parentElement.querySelectorAll('.opt').forEach((b) => b.classList.toggle('selected', b.dataset.opt === val));
+    btn.closest('section').classList.toggle('has-sel', !!val);
+    if (val) btn.classList.remove('peek');
     updateFooter(g);
   });
   document.querySelectorAll('.regen-btn').forEach((b) => b.onclick = () => {
@@ -1182,7 +1216,7 @@ async function renderActivity() {
       <div style="min-width:0">
         <div><b>${esc(g.who)}</b>${g.title ? ` · ${g.game ? `<a href="#/game/${encodeURIComponent(g.game)}">${esc(g.title)}</a>` : esc(g.title)}` : ''}</div>
         <div class="act-text">${[...new Set(g.texts)].map(esc).join('<br>')}</div>
-        <div class="small muted">${sinceText(g.at)} önce · ${fmtDate(g.at)}</div>
+        <div class="small muted">${sinceText(g.at)}${sinceText(g.at) === 'az önce' ? '' : ' önce'} · ${fmtDate(g.at)}</div>
       </div>
     </div>`).join('') : '<p class="small muted">Henüz etkinlik yok.</p>';
 }

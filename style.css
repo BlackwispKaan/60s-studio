@@ -323,3 +323,30 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .need-note { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
 .need-fb { margin-left: 6px; }
 .need-fb.on { color: var(--warn); }
+
+/* ⏱ kelime seçici */
+.at-picker { margin: 4px 0 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--bg); }
+.at-words { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.at-words .w { font: inherit; font-size: 14px; padding: 4px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+.at-words .w:hover { border-color: var(--accent); }
+.at-words .w.on { background: var(--accent); color: #141414; border-color: var(--accent); }
+/* Seçim yapılmış bölümde diğer seçenekler katlanır */
+.peek-btn { display: none; margin-top: 6px; }
+.has-sel .opt:not(.selected) .peek-btn { display: inline-block; }
+.has-sel .opt:not(.selected):not(.peek) .opt-meta { display: none; }
+.has-sel .opt:not(.selected) { opacity: .8; }
+.has-sel .opt:not(.selected):hover, .has-sel .opt.peek { opacity: 1; }
+/* Alt bar bölüm kısayolları */
+.sec-nav { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.sec-dot { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0; }
+.sec-dot.done { background: var(--accent); border-color: var(--accent); color: #141414; }
+.sec-dot:not(.done) { border-color: var(--warn); color: var(--warn); }
+@media (max-width: 640px) { .sec-nav { order: 10; width: 100%; justify-content: space-between; } }
+/* Mobil üst bar: sağdaki düğmeler ekrandan taşmasın (sayfa genişleyip alt bar kesiliyordu) */
+@media (max-width: 600px) {
+  .topbar { gap: 8px; padding: 10px 12px; }
+  .brand-name { display: none; }
+  .topbar-right { gap: 5px; min-width: 0; }
+  .worker-pill { max-width: 84px; }
+  .footer-inner { gap: 10px; }
+}
