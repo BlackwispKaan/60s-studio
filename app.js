@@ -550,7 +550,8 @@ function roleBlocksHtml(slug, sec, o) {
     const list = needs.filter((n) => roleOf(n) === r);
     if (!list.length) return '';
     const [h, hint] = ROLE_HEAD[r];
-    return `<div class="role role-${r}"><div class="role-head"${hint ? ` title="${esc(hint)}"` : ''}>${h}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}</div>`;
+    const extra = r === 'overlay' ? list.map((n) => `<button type="button" class="link-btn small green-add" data-green-add="${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}">+ Green screen kataloğundan seç</button>`).join('') : '';
+    return `<div class="role role-${r}"><div class="role-head"${hint ? ` title="${esc(hint)}"` : ''}>${h}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}${extra}</div>`;
   }).join('');
 }
 function optionHtml(sec, o, slug) {
@@ -567,7 +568,7 @@ function optionHtml(sec, o, slug) {
         ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek görüntü</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       </dl>
       ${roleBlocksHtml(slug, sec, o)}
-      <button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan başka meme ekle</button>
+      <button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan ara klip ekle</button>
     </div>
   </div>`;
 }
@@ -799,6 +800,34 @@ async function canonModal(onAdd) {
   draw();
 }
 
+// Green Screen Kataloğu (oyun ekranına bindirme için) — _studio/memes/greens.json
+async function greensModal(onPick) {
+  openModal(`<h2>🟩 Green Screen Kataloğu</h2><div class="empty"><span class="spinner"></span></div>`);
+  if (!S.greens) S.greens = (await readJSON('_studio/memes/greens.json'))?.data || [];
+  const pv = (c, f) => `${c.pvBase || '_studio/memes/previews/'}${f}`;
+  const draw = (q = '') => {
+    const ql = q.toLowerCase();
+    const list = S.greens.filter((c) => !ql || [c.name, c.tr, c.use, ...(c.tags || [])].join(' ').toLowerCase().includes(ql));
+    $('#greenGrid').innerHTML = list.map((c) => `<div class="cand">
+      <button type="button" class="cand-media" data-play="${esc(pv(c, c.video))}" data-kind="meme"><img data-src="${esc(pv(c, c.thumb))}" alt=""><span class="play-badge">▶</span></button>
+      <div class="cand-title"><b>${esc(c.name)}</b><div class="small muted">${esc(c.tr || '')}</div>${c.use ? `<div class="small">🎯 ${esc(c.use)}</div>` : ''}</div>
+      <div class="cand-actions"><button type="button" class="btn green-pick" data-gid="${esc(c.id)}">Seç</button></div></div>`).join('') || '<p class="muted">Sonuç yok.</p>';
+    hydrateThumbs();
+    document.querySelectorAll('#greenGrid .cand-media').forEach((el) => el.onclick = () => playPreview(el));
+    document.querySelectorAll('.green-pick').forEach((b) => b.onclick = () => {
+      const c = S.greens.find((x) => x.id === b.dataset.gid);
+      closeModal(); onPick(c); toast(`${c.name} seçildi ✓`);
+    });
+  };
+  $('#modalBody').innerHTML = `<h2>🟩 Green Screen Kataloğu</h2>
+    <p class="small muted" style="margin-top:0">${S.greens.length} green screen meme. Oyun görüntüsünün üstüne bindirilir. Önizlemek için tıkla, kullanmak için <b>Seç</b>.</p>
+    <input type="text" id="greenQ" placeholder="Ara: patlama, para, polis, emoji, gözlük, iskelet…" style="width:100%;margin-bottom:10px">
+    <div id="greenGrid" class="cands canon-grid"></div>`;
+  $('#modal .modal-card').classList.add('wide');
+  $('#greenQ').oninput = (e) => draw(e.target.value);
+  draw();
+}
+
 const cutCount = (g) => g.sections.reduce((k, s) => k + ((selectedOpt(s)?.needs || []).filter((n) => n.type === 'meme' && n.chosen !== 'none' && (n.role === 'cutaway' || !n.role)).length), 0);
 function updateFooter(g) {
   const cc = $('#stCuts'); if (cc) { const n = cutCount(g); cc.textContent = n; cc.style.color = n > 5 ? 'var(--warn)' : ''; }
@@ -926,6 +955,23 @@ function bindGame(g0) {
       try { await S.store.del(`games/${slug}/MATERIALS.md`, `[${S.user}] ${cur().title}: materyal listesi kaldırıldı`); } catch (e) { console.warn(e); }
       toast('Seçim aşamasına dönüldü ✓'); renderGame(slug);
     } catch (e) { toast('Olmadı: ' + e.message, true); }
+  });
+  document.querySelectorAll('.green-add').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file] = b.dataset.greenAdd.split('|');
+    greensModal((c) => {
+      queueOp(slug, (x) => {
+        const n = findNeed(x, sid, oid, file);
+        n.candidates = n.candidates || [];
+        if (!n.candidates.some((k) => k.id === c.lib)) {
+          n.candidates.push({ id: c.lib, title: c.name, tr: c.tr, source: 'greens', page: c.page, duration: c.duration, style: 'green',
+            thumb: c.thumb, video: c.video, pvBase: c.pvBase, ...(c.clip ? { clip: c.clip } : {}), addedBy: S.user });
+        }
+        n.chosen = c.lib;
+      }, `${file} → katalog: ${c.id}`);
+      renderGame(slug);
+    });
   });
   document.querySelectorAll('.reopen-btn').forEach((b) => b.onclick = () => {
     const sec = b.closest('section'); const on = sec.classList.toggle('reopen');

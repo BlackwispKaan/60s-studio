@@ -396,3 +396,5 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 
 .step.go-back { cursor: pointer; }
 .step.go-back:hover { color: var(--accent); }
+
+.green-add { display: inline-block; margin-top: 2px; color: #4ade80; }
