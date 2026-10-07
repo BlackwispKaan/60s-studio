@@ -218,6 +218,7 @@ function buildMaterials(g) {
     (s.gameplay || []).forEach((x) => add({ id: x.id, type: 'gameplay', section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '' }));
     const o = selectedOpt(s);
     (o?.needs || []).forEach((x, j) => {
+      if (x.type === 'sfx') return;  // ses efektleri ekibe sorulmaz; worker kurguda seçer
       const base = { id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] };
       if (x.chosen === 'none') return;
       if (x.designed) {
@@ -241,7 +242,7 @@ function buildMaterials(g) {
 }
 function missingChoices(g) {
   // Seçili seçeneklerde, adayı olan ama ekibin henüz seçim yapmadığı meme/sfx ihtiyaçları
-  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.candidates?.length && (!n.chosen || (n.chosen === 'custom' && !n.custom?.url))));
+  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.type !== 'sfx' && n.candidates?.length && (!n.chosen || (n.chosen === 'custom' && !n.custom?.url))));
 }
 function materialsMarkdown(g) {
   // Ekip için sade liste: hangi bölüm, ne kaydedilecek, hangi adla. Claude/worker'ın kendi hazırladıkları (meme/sfx/anlatım) burada yok.
@@ -543,10 +544,11 @@ const ROLE_HEAD = {
   meme: ['🎬 Meme', ''],
 };
 function roleBlocksHtml(slug, sec, o) {
-  const needs = (o.needs || []).filter((n) => n.type !== 'gameplay');
+  // Ses efektleri ekibe sorulmaz (2026-10-07): klip/green screen kendi sesini taşır, gerekirse worker kurguda ekler
+  const needs = (o.needs || []).filter((n) => n.type !== 'gameplay' && n.type !== 'sfx');
   if (!needs.length) return '<span class="muted small">Bu seçenekte meme yok, sadece oyun görüntüsü + altyazı.</span>';
   const roleOf = (n) => n.role || (n.type === 'sfx' ? 'sfx' : 'meme');
-  return ['overlay', 'cutaway', 'meme', 'sfx'].map((r) => {
+  return ['overlay', 'cutaway', 'meme'].map((r) => {
     const list = needs.filter((n) => roleOf(n) === r);
     if (!list.length) return '';
     const [h, hint] = ROLE_HEAD[r];
