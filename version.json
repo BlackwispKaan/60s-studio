@@ -1,8 +1,13 @@
 {
- "v": 33,
- "at": "2026-10-07T03:53:25+00:00",
- "msg": "Bölüm tasarımı sadeleşti: opsiyonel/teknik/değişti notları kaldırıldı, meme blokları tam genişlik, not kutusu katlanır",
+ "v": 34,
+ "at": "2026-10-07T03:55:05+00:00",
+ "msg": "Materyal aşamasından Seçime geri dönüş (düğme + aşama çubuğu); S1'de tekrar eden açılış kutusu kaldırıldı",
  "history": [
+  {
+   "v": 34,
+   "at": "2026-10-07T03:55:05+00:00",
+   "msg": "Materyal aşamasından Seçime geri dönüş (düğme + aşama çubuğu); S1'de tekrar eden açılış kutusu kaldırıldı"
+  },
   {
    "v": 33,
    "at": "2026-10-07T03:53:25+00:00",

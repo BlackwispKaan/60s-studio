@@ -393,3 +393,6 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .canon-add { margin-top: 2px; }
 .sec-tools { margin-top: 10px; }
 .sec-tools summary { cursor: pointer; }
+
+.step.go-back { cursor: pointer; }
+.step.go-back:hover { color: var(--accent); }

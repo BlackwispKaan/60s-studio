@@ -460,7 +460,8 @@ function editGameModal(slug) {
 
 function pipelineHtml(g) {
   const cur = STATUS[g.status]?.step ?? 0;
-  return `<div class="pipeline">${STEPS.map((s, i) => `<div class="step ${i < cur ? 'done' : ''} ${i === cur ? 'current' : ''}"><div class="bar"></div>${s}</div>`).join('')}</div>`;
+  const back = g.status === 'collecting';
+  return `<div class="pipeline">${STEPS.map((s, i) => `<div class="step ${i < cur ? 'done' : ''} ${i === cur ? 'current' : ''} ${back && s === 'Seçim' ? 'go-back' : ''}" ${back && s === 'Seçim' ? 'title="Seçim aşamasına geri dön" role="button" tabindex="0"' : ''}><div class="bar"></div>${s}</div>`).join('')}</div>`;
 }
 
 const REF_ICON = { youtube: '▶', gif: 'GIF', sfx: '🔊', stock: '🎞', search: '🔎', local: '📁' };
@@ -570,7 +571,6 @@ function sectionHtml(sec, i, editable, opening, slug, g) {
   return `<section class="card ${sec.selected ? 'has-sel' : ''} ${collecting ? 'collecting' : ''}" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
     <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
-    ${i === 0 && opening ? `<div class="opening">Sabit açılış: <b>“${esc(opening)}”</b> <span class="muted small">· seçenekler sadece ikinci cümleyi değiştirir</span></div>` : ''}
     ${collecting ? secMaterialsHtml(g, i) + `<button type="button" class="btn small reopen-btn">✏️ Seçimi değiştir</button>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
     <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
@@ -589,10 +589,11 @@ function materialsSummaryHtml(g) {
   const done = mats.filter((m) => m.done).length;
   return `<section class="card" id="materials">
     <div class="row"><h2>📦 Materyaller</h2><span class="pill">${done}/${mats.length} toplandı</span><span class="spacer"></span>
+      <button class="btn btn-ghost back-to-choose">← Seçime geri dön</button>
       <button class="btn btn-ghost" id="showExport">Tüm listeyi göster / indir</button></div>
     <div class="small muted" style="margin-top:10px">Her bölümün toplanacak görüntüleri aşağıda kendi kartında. Topladıkça kutuyu işaretleyin.
       ${g.settings.mediaFolderUrl ? `Dosyaları listedeki adlarla bu klasöre yükleyin: ${driveLink(g)}` : 'Drive klasörü henüz bağlı değil.'}
-      Bir bölümün seçimini değiştirmek isterseniz o bölümdeki <b>✏️ Seçimi değiştir</b>'e basın.</div>
+      Tek bir bölümü değiştirmek için o bölümdeki <b>✏️ Seçimi değiştir</b>, hepsine dönmek için <b>← Seçime geri dön</b>.</div>
   </section>`;
 }
 function secMaterialsHtml(g, i) {
@@ -906,6 +907,14 @@ function bindGame(g0) {
     box.querySelector('[data-act="auto"]').onclick = () => save('');
     box.querySelector('[data-act="close"]').onclick = () => box.remove();
     chip.closest('.need-head').after(box); paint();
+  });
+  document.querySelectorAll('.back-to-choose, .step.go-back').forEach((b) => b.onclick = async () => {
+    if (!confirm('Seçim aşamasına geri dönülsün mü? İşaretlenen materyaller korunur; seçimler bitince tekrar "Çıktı al".')) return;
+    try {
+      await flush(slug);
+      await mutateGame(slug, (x) => { x.status = 'choosing'; logLine(x, `${S.user} seçim aşamasına geri döndü.`); }, 'seçime geri dönüldü');
+      toast('Seçim aşamasına dönüldü ✓'); renderGame(slug);
+    } catch (e) { toast('Olmadı: ' + e.message, true); }
   });
   document.querySelectorAll('.reopen-btn').forEach((b) => b.onclick = () => {
     const sec = b.closest('section'); const on = sec.classList.toggle('reopen');
