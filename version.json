@@ -1,8 +1,13 @@
 {
- "v": 38,
- "at": "2026-10-07T04:55:24+00:00",
- "msg": "Önizleme ses ayarı (genel); kanon/green katalog seçimi yuvanın içine aday olarak eklenir (tek seçim)",
+ "v": 39,
+ "at": "2026-10-07T07:42:19+00:00",
+ "msg": "Ekranda satırı seçimlerden canlı üretilir; Ses satırı kaldırıldı",
  "history": [
+  {
+   "v": 39,
+   "at": "2026-10-07T07:42:19+00:00",
+   "msg": "Ekranda satırı seçimlerden canlı üretilir; Ses satırı kaldırıldı"
+  },
   {
    "v": 38,
    "at": "2026-10-07T04:55:24+00:00",
@@ -97,11 +102,6 @@
    "v": 20,
    "at": "2026-10-06T15:40:19+00:00",
    "msg": "Token alanı: Göster / Kopyala + karakter sayısı kontrolü"
-  },
-  {
-   "v": 19,
-   "at": "2026-10-06T15:32:22+00:00",
-   "msg": "Kanondan meme tek tıkla eklenir; vuruş anı (⏱) isteğe bağlı ve tıklayıp düzenlenebilir"
   }
  ]
 }

@@ -543,6 +543,21 @@ const ROLE_HEAD = {
   sfx: ['🔊 Ses efekti', ''],
   meme: ['🎬 Meme', ''],
 };
+// "Ekranda" satırı sabit metin değil, ekibin o anki seçimlerinden üretilir (2026-10-07: sabit metin seçilmemiş FBI klibini anlatıyordu)
+function flowHtml(sec, o) {
+  const pick = (n) => {
+    if (!n || n.chosen === 'none' || !n.chosen) return null;
+    if (n.chosen === 'custom') return n.custom?.url ? 'kendi verdiğiniz klip' : null;
+    return (n.candidates || []).find((c) => c.id === n.chosen)?.title || null;
+  };
+  const at = (n) => (n?.at ? ` <span class="muted">(“${esc(n.at.replace(/"/g, ''))}”)</span>` : '');
+  const ov = (o.needs || []).find((n) => n.role === 'overlay');
+  const cu = (o.needs || []).find((n) => n.role === 'cutaway');
+  const parts = ['🎮 Oyun görüntüsü + altyazı'];
+  if (pick(ov)) parts.push(`🟩 üstüne <b>${esc(pick(ov))}</b>${at(ov)}`);
+  if (pick(cu)) parts.push(`🎬 ara klip: <b>${esc(pick(cu))}</b>${at(cu)}`);
+  return parts.join(' → ');
+}
 function roleBlocksHtml(slug, sec, o) {
   // Ses efektleri ekibe sorulmaz (2026-10-07): klip/green screen kendi sesini taşır, gerekirse worker kurguda ekler
   const needs = (o.needs || []).filter((n) => n.type !== 'gameplay' && n.type !== 'sfx');
@@ -567,8 +582,7 @@ function optionHtml(sec, o, slug) {
     <button type="button" class="link-btn small peek-btn">▸ ayrıntıları göster</button>
     <div class="opt-meta">
       <dl class="opt-desc">
-        <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
-        ${o.sound ? `<dt>Ses</dt><dd>${esc(o.sound)}</dd>` : ''}
+        <dt>Ekranda</dt><dd class="flow" data-flow="${esc(sec.id)}|${esc(o.id)}">${flowHtml(sec, o)}</dd>
         ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek görüntü</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       </dl>
       ${roleBlocksHtml(slug, sec, o)}
@@ -900,6 +914,8 @@ function bindGame(g0) {
     });
     const hint = box.previousElementSibling?.querySelector('.muted.small'); if (hint) hint.textContent = `· ${val ? '✓ seçildi' : 'birini seç'}`;
     const form = box.querySelector('.custom-form'); if (form) { form.hidden = val !== 'custom'; if (val === 'custom') form.querySelector('input').focus(); }
+    const fl = document.querySelector(`[data-flow="${sid}|${oid}"]`);
+    if (fl) { const sec = cur().sections.find((x) => x.id === sid); fl.innerHTML = flowHtml(sec, sec.options.find((x) => x.id === oid)); }
   });
   document.querySelectorAll('.custom-form input').forEach((inp) => {
     inp.onclick = (ev) => ev.stopPropagation();
