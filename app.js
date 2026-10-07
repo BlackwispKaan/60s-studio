@@ -521,7 +521,7 @@ function optionHtml(sec, o, slug) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Meme seçmek için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n) => needHtml(slug, sec, o, n)).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
+      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Meme seçmek için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n, k, all) => `<div class="beat"><div class="beat-no">${n.type === 'sfx' ? '🔊 Ses' : '🎬 Vuruş'} ${k + 1}/${all.length}</div>${needHtml(slug, sec, o, n)}</div>`).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
         <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
       ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>

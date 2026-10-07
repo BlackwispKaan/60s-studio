@@ -350,3 +350,8 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
   .worker-pill { max-width: 84px; }
   .footer-inner { gap: 10px; }
 }
+
+/* Her meme vuruşu ayrı kutu: bir seçenekte birden fazla "Seçildi" görünmesi kafa karıştırıyordu */
+.beat { border-left: 3px solid var(--border); padding: 4px 0 4px 12px; margin: 8px 0 14px; }
+.opt.selected .beat { border-left-color: var(--accent); }
+.beat-no { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
