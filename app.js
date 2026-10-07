@@ -516,12 +516,12 @@ function customCandHtml(sec, o, n) {
 
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  const head = `<div class="need-head">${n.role ? esc(n.desc) : `${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}`}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen === 'none' ? 'kullanılmayacak' : n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
+  const showDesc = !(n.role === 'cutaway' && !n.added);  // ara klipte başlık zaten "Ara klip"; etiket ayrıca gösteriliyor
+  const head = `<div class="need-head">${showDesc ? `<span class="need-desc">${n.role ? esc(n.desc) : `${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}`}</span>` : ''}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length && !n.chosen ? ` <span class="small" style="color:var(--warn)">· birini seç</span>` : ''}
     ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}
-    ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎 Alakasız'}</button>` : ''}</div>
-    ${n.why ? `<div class="need-why">💡 <b>Neden komik:</b> ${esc(n.why)}</div>` : ''}
+    ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Alakasız: bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎'}</button>` : ''}</div>
+    ${n.why ? `<div class="need-why">💡 ${esc(n.why)}</div>` : ''}
     ${n.review ? `<div class="need-warn">⚠️ ${esc(n.review)}</div>` : ''}
-    ${n.replaced ? `<div class="need-note">🔄 Değişti: <i>${esc(n.replaced.from)}</i> yerine${n.replaced.reason ? ` · sebep: ${esc(n.replaced.reason)}` : ''}</div>` : ''}
     ${n.feedback && !n.feedbackDone ? `<div class="need-note">👎 ${esc(n.feedback.by)}: “${esc(n.feedback.reason || 'alakasız')}” · alttan <b>Tekrar yap</b>'a basınca işlenir</div>` : ''}`;
   const label = n.role === 'cutaway' && n.label ? `<div class="cut-label"><span>${esc(n.label)}</span></div>` : '';
   if (n.designed) return head + `<div class="designed" title="${WORKER_NAME} çizer, seçim gerekmez.">🎨 Hazır tasarım</div>`;
@@ -530,8 +530,8 @@ function needHtml(slug, sec, o, n) {
 
 // Örnek videolara göre (SAMPLE_BREAKDOWN): oyun üstü bindirme (≤1) + opsiyonel ara klip (≤1) + ses efekti
 const ROLE_HEAD = {
-  overlay: ['🟩 Oyun ekranına bindirme (opsiyonel)', 'Oyun görüntüsü durmadan üstüne konur.'],
-  cutaway: ['🎬 Ara klip (opsiyonel)', ' Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
+  overlay: ['🟩 Oyun ekranına bindirme', 'Oyun görüntüsü durmadan üstüne konur.'],
+  cutaway: ['🎬 Ara klip', ' Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
   sfx: ['🔊 Ses efekti', ''],
   meme: ['🎬 Meme', ''],
 };
@@ -553,14 +553,15 @@ function optionHtml(sec, o, slug) {
     <div class="opt-en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${esc(o.narration)}”</div>
     <div class="opt-tr">🇹🇷 ${esc(o.tr)}</div>
     <button type="button" class="link-btn small peek-btn">▸ ayrıntıları göster</button>
-    <dl class="opt-meta">
-      <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
-      <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      <dt>Meme / ses</dt><dd>${roleBlocksHtml(slug, sec, o)}
-        <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
-      ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
-      <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
-    </dl>
+    <div class="opt-meta">
+      <dl class="opt-desc">
+        <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
+        ${o.sound ? `<dt>Ses</dt><dd>${esc(o.sound)}</dd>` : ''}
+        ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek görüntü</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
+      </dl>
+      ${roleBlocksHtml(slug, sec, o)}
+      <button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan başka meme ekle</button>
+    </div>
   </div>`;
 }
 
@@ -573,11 +574,12 @@ function sectionHtml(sec, i, editable, opening, slug, g) {
     ${collecting ? secMaterialsHtml(g, i) + `<button type="button" class="btn small reopen-btn">✏️ Seçimi değiştir</button>` : ''}
     <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
     <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
+    <details class="sec-tools" ${sec.note || sec.regen ? 'open' : ''}><summary class="small muted">✏️ Not ekle / bu bölümü yeniden öner</summary>
     <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="${sec.regen ? 'Yeni tema / istek: ör. “Pauselock esprisi olsun, oyunu durdurup kaçan oyunculara gönderme”' : 'Bu bölüm için not / kendi fikrin (opsiyonel)'}" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
     <div class="row" style="margin-top:8px">
       <button type="button" class="btn ${sec.regen ? 'btn-primary' : 'btn-ghost'} small regen-btn" data-regen="${esc(sec.id)}" ${editable ? '' : 'disabled'}>${sec.regen ? '🔄 Yeniden önerilecek ✓' : '🔄 Bu bölümü yeniden öner'}</button>
-      <span class="small muted">${sec.regen ? 'Notuna göre 3 yeni seçenek hazırlanacak. Alttan <b>Tekrar yap</b>\'a bas.' : 'Seçenekleri beğenmediysen notuna kendi temanı yaz ve işaretle.'}</span>
-    </div>
+      <span class="small muted">${sec.regen ? 'Alttan <b>Tekrar yap</b>\'a bas.' : 'Notuna yeni temayı yaz, sonra işaretle.'}</span>
+    </div></details>
   </section>`;
 }
 

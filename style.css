@@ -373,3 +373,23 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .cut-label span { color: #fff; font-weight: 800; letter-spacing: .3px; font-size: 13px; }
 .designed { font-size: 13px; color: var(--muted); margin: 2px 0 8px; }
 .cand.none .custom-media span { font-size: 26px; }
+
+/* Okunabilirlik sadeleştirmesi (2026-10-07) */
+.opt-meta { display: block; }
+.opt-desc { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 10px 0 6px; font-size: 13.5px; }
+.opt-desc dt { color: var(--muted); font-weight: 600; }
+.opt-desc dd { margin: 0; }
+@media (max-width: 600px) { .opt-desc { grid-template-columns: 1fr; } .opt-desc dd { margin-bottom: 4px; } }
+.has-sel .opt:not(.selected):not(.peek) .opt-meta { display: none; }
+.role { margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.need-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13.5px; }
+.need-desc { font-weight: 600; }
+.need-fb { margin-left: auto; opacity: .55; }
+.need-fb:hover, .need-fb.on { opacity: 1; }
+.need-why { margin: 3px 0 8px; }
+.role .style-badge { display: none; }
+.custom-form[hidden] { display: none; }
+.cand.custom .cand-media, .cand.none .cand-media { min-height: 0; padding: 14px 8px; }
+.canon-add { margin-top: 2px; }
+.sec-tools { margin-top: 10px; }
+.sec-tools summary { cursor: pointer; }
