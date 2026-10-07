@@ -87,6 +87,11 @@ class GitHubStore {
       method: 'PUT', body: JSON.stringify({ message, content: b64enc(text), branch: REPO.branch, ...(sha ? { sha } : {}) }),
     });
   }
+  async del(path, message) {
+    const cur = await this.get(path);
+    if (!cur) return null;
+    return this.req(`contents/${encodeURI(path)}`, { method: 'DELETE', body: JSON.stringify({ message, sha: cur.sha, branch: REPO.branch }) });
+  }
   async list(path) {
     const j = await this.req(`contents/${encodeURI(path)}?ref=${REPO.branch}&t=${Date.now()}`);
     return Array.isArray(j) ? j.map((x) => ({ name: x.name, type: x.type })) : [];
@@ -117,6 +122,7 @@ class LocalDemoStore {
     return r.ok ? { text: await r.text(), sha: 'local' } : null;
   }
   async put(path, text) { this.mem.set(path, text); return {}; }
+  async del(path) { this.mem.set(path, null); return {}; }
   async blobUrl(path) { return `../${path}`; }
   async commits() {
     // Demo: commit yok, oyunların log kayıtlarından üret
@@ -682,7 +688,7 @@ async function renderGame(slug) {
       ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
-      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length ? materialsHtml(g) : ''}
+      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length && !['choosing', 'queued_regen'].includes(g.status) ? materialsHtml(g) : ''}
       ${stale ? `<div class="card" style="border-color:var(--warn)">⚠️ Seçimler çıktıdan sonra değişti. Materyal listesini güncellemek için <b>Çıktı al</b>'a tekrar bas.</div>` : ''}
       ${g.sections?.length ? `
         <section class="card">
@@ -909,10 +915,15 @@ function bindGame(g0) {
     chip.closest('.need-head').after(box); paint();
   });
   document.querySelectorAll('.back-to-choose, .step.go-back').forEach((b) => b.onclick = async () => {
-    if (!confirm('Seçim aşamasına geri dönülsün mü? İşaretlenen materyaller korunur; seçimler bitince tekrar "Çıktı al".')) return;
+    if (!confirm('Seçim aşamasına geri dönülsün mü? Materyal listesi silinir (Drive\'daki liste de kaldırılır); seçimler bitince tekrar "Çıktı al".')) return;
     try {
       await flush(slug);
-      await mutateGame(slug, (x) => { x.status = 'choosing'; logLine(x, `${S.user} seçim aşamasına geri döndü.`); }, 'seçime geri dönüldü');
+      await mutateGame(slug, (x) => {
+        x.status = 'choosing';
+        for (const k of ['materials', 'exportSig', 'exportedAt', 'exportedBy']) delete x[k];
+        logLine(x, `${S.user} seçim aşamasına geri döndü; materyal listesi sıfırlandı.`);
+      }, 'seçime geri dönüldü');
+      try { await S.store.del(`games/${slug}/MATERIALS.md`, `[${S.user}] ${cur().title}: materyal listesi kaldırıldı`); } catch (e) { console.warn(e); }
       toast('Seçim aşamasına dönüldü ✓'); renderGame(slug);
     } catch (e) { toast('Olmadı: ' + e.message, true); }
   });
