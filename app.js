@@ -552,7 +552,9 @@ function roleBlocksHtml(slug, sec, o) {
     const list = needs.filter((n) => roleOf(n) === r);
     if (!list.length) return '';
     const [h, hint] = ROLE_HEAD[r];
-    const extra = r === 'overlay' ? list.map((n) => `<button type="button" class="link-btn small green-add" data-green-add="${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}">+ Green screen kataloğundan seç</button>`).join('') : '';
+    const key = (n) => `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
+    const extra = r === 'overlay' ? list.map((n) => `<button type="button" class="link-btn small green-add" data-green-add="${key(n)}">+ Green screen kataloğundan seç</button>`).join('')
+      : r === 'cutaway' ? list.map((n) => `<button type="button" class="link-btn small canon-into" data-canon-into="${key(n)}">+ Meme Kanonu'ndan seç</button>`).join('') : '';
     return `<div class="role role-${r}"><div class="role-head"${hint ? ` title="${esc(hint)}"` : ''}>${h}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}${extra}</div>`;
   }).join('');
 }
@@ -570,7 +572,7 @@ function optionHtml(sec, o, slug) {
         ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek görüntü</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       </dl>
       ${roleBlocksHtml(slug, sec, o)}
-      <button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan ara klip ekle</button>
+      ${(o.needs || []).some((n) => n.role === 'cutaway') ? '' : `<button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Ara klip ekle (Meme Kanonu)</button>`}
     </div>
   </div>`;
 }
@@ -749,13 +751,41 @@ function hydrateThumbs() {
   imgs.forEach((i) => io.observe(i));
 }
 let currentAudio = null;
+// Önizleme ses düzeyi: tek genel ayar (bu tarayıcıda saklanır). Bir videonun sesini değiştirince hepsine uygulanır.
+const VOL = { v: Math.min(1, Math.max(0, parseFloat(ls.get('studio.vol') ?? '0.35'))), muted: ls.get('studio.mute') === '1' };
+const volIcon = () => (VOL.muted || VOL.v === 0 ? '🔇' : VOL.v < 0.5 ? '🔉' : '🔊');
+function applyVolume(src) {
+  document.querySelectorAll('video.cand-video, audio').forEach((m) => { if (m !== src) { m.volume = VOL.v; m.muted = VOL.muted; } });
+  if (currentAudio && currentAudio !== src) { currentAudio.volume = VOL.v; currentAudio.muted = VOL.muted; }
+  const b = document.getElementById('volBtn'); if (b) b.textContent = volIcon();
+  const r = document.getElementById('volRange'); if (r && document.activeElement !== r) r.value = Math.round(VOL.v * 100);
+}
+function setVolume(v, muted, src) {
+  VOL.v = Math.min(1, Math.max(0, v)); VOL.muted = !!muted;
+  ls.set('studio.vol', String(VOL.v)); ls.set('studio.mute', VOL.muted ? '1' : '0');
+  applyVolume(src);
+}
+function bindMedia(m) {
+  m.volume = VOL.v; m.muted = VOL.muted;
+  m.addEventListener('volumechange', () => { if (m.volume !== VOL.v || m.muted !== VOL.muted) setVolume(m.volume, m.muted, m); });
+}
+function initVolumeControl() {
+  const btn = document.getElementById('volBtn'), pop = document.getElementById('volPop'), r = document.getElementById('volRange');
+  if (!btn) return;
+  btn.textContent = volIcon(); r.value = Math.round(VOL.v * 100);
+  btn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; };
+  r.oninput = () => setVolume(r.value / 100, false);
+  document.getElementById('volMute').onclick = () => setVolume(VOL.v, !VOL.muted);
+  document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target) && e.target !== btn) pop.hidden = true; });
+}
+
 async function playPreview(el) {
   const path = el.dataset.play;
   if (el.dataset.kind === 'sfx') {
     if (currentAudio) { currentAudio.pause(); if (currentAudio._el === el) { currentAudio = null; el.classList.remove('playing'); return; } currentAudio._el.classList.remove('playing'); }
     el.classList.add('loading');
     try {
-      const a = new Audio(await blob(path)); a._el = el; currentAudio = a;
+      const a = new Audio(await blob(path)); a._el = el; currentAudio = a; bindMedia(a);
       a.onended = () => { el.classList.remove('playing'); currentAudio = null; };
       el.classList.add('playing'); await a.play();
     } catch { toast('Ses yüklenemedi', true); } finally { el.classList.remove('loading'); }
@@ -764,7 +794,7 @@ async function playPreview(el) {
   el.classList.add('loading');
   try {
     const v = document.createElement('video');
-    v.src = await blob(path); v.controls = true; v.autoplay = true; v.playsInline = true; v.className = 'cand-video';
+    v.src = await blob(path); v.controls = true; v.autoplay = true; v.playsInline = true; v.className = 'cand-video'; bindMedia(v);
     v.onclick = (ev) => ev.stopPropagation();
     el.replaceWith(v);
   } catch { toast('Video yüklenemedi', true); el.classList.remove('loading'); }
@@ -957,6 +987,23 @@ function bindGame(g0) {
       try { await S.store.del(`games/${slug}/MATERIALS.md`, `[${S.user}] ${cur().title}: materyal listesi kaldırıldı`); } catch (e) { console.warn(e); }
       toast('Seçim aşamasına dönüldü ✓'); renderGame(slug);
     } catch (e) { toast('Olmadı: ' + e.message, true); }
+  });
+  document.querySelectorAll('.canon-into').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    const [sid, oid, file] = b.dataset.canonInto.split('|');
+    canonModal((c) => {
+      queueOp(slug, (x) => {
+        const n = findNeed(x, sid, oid, file);
+        n.candidates = n.candidates || [];
+        if (!n.candidates.some((k) => k.id === c.lib)) {
+          n.candidates.push({ id: c.lib, title: c.name, tr: c.tr, canon: c.id, source: 'canon', page: c.page, duration: c.duration, style: c.style,
+            thumb: c.thumb, video: c.video, pvBase: '_studio/memes/previews/', ...(c.clip ? { clip: c.clip } : {}), addedBy: S.user });
+        }
+        n.chosen = c.lib;
+      }, `${file} → kanon: ${c.id}`);
+      renderGame(slug);
+    });
   });
   document.querySelectorAll('.green-add').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
@@ -1400,6 +1447,7 @@ async function boot() {
     const a = $('#driveRoot'); if (a && S.config.driveRootUrl) { a.href = S.config.driveRootUrl; a.innerHTML = DRIVE_SVG; a.hidden = false; }
   } catch {}
   if (S.user && !S.members.includes(S.user)) S.user = null;
+  initVolumeControl();
   renderUserSelect();
   await route();
 }

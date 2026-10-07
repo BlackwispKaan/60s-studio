@@ -398,3 +398,10 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .step.go-back:hover { color: var(--accent); }
 
 .green-add { display: inline-block; margin-top: 2px; color: #4ade80; }
+
+/* Önizleme ses ayarı */
+.vol-wrap { position: relative; }
+.vol-pop { position: absolute; right: 0; top: 44px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; width: 210px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.vol-pop[hidden] { display: none; }
+.vol-pop input[type=range] { width: 100%; accent-color: var(--accent); }
