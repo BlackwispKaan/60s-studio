@@ -213,6 +213,11 @@ function buildMaterials(g) {
     const o = selectedOpt(s);
     (o?.needs || []).forEach((x, j) => {
       const base = { id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] };
+      if (x.chosen === 'none') return;
+      if (x.designed) {
+        out.push({ ...base, auto: true, chosen: 'designed', chosenTitle: `Tasarım: ${x.desc}`, chosenExplicit: true, done: true, doneBy: WORKER_NAME });
+        seen.add(base.file); return;
+      }
       if (x.candidates?.length) {
         // Meme/sfx adaylarını Claude indirdi; ekip sadece seçer. Seçilmezse ilk aday kullanılır.
         if (x.chosen === 'custom' && x.custom?.url) {
@@ -478,19 +483,27 @@ function candidatesHtml(slug, sec, o, n) {
         ${c.style ? `<span class="style-badge ${c.style}">${c.style === 'green' ? 'Green screen' : 'Tam video'}${c.vertical ? ' · dikey' : ''}</span>` : ''}
         <span class="play-badge">▶</span>
       </button>
-      <div class="cand-title">${esc(c.title)}${c.duration ? ` <span class="muted">· ${Math.round(c.duration)} sn</span>` : ''}</div>
+      <div class="cand-title">${esc(c.title)}${c.duration ? ` <span class="muted">· ${Math.round(c.duration)} sn</span>` : ''}${c.tr ? `<div class="small muted">${esc(c.tr)}</div>` : ''}</div>
       <div class="cand-actions">
         <button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}|${esc(c.id)}">${on ? '✓ Seçildi' : 'Seç'}</button>
         <a class="small muted" href="${esc(c.page)}" target="_blank" rel="noopener">kaynak ↗</a>
       </div>
     </div>`;
-  }).join('')}${customCandHtml(sec, o, n)}</div>`;
+  }).join('')}${n.optional ? noneCandHtml(sec, o, n) : ''}${customCandHtml(sec, o, n)}</div>`;
+}
+function noneCandHtml(sec, o, n) {
+  const on = n.chosen === 'none';
+  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
+  return `<div class="cand none ${on ? 'chosen' : ''}" data-cand="none">
+    <div class="cand-media custom-media"><span>🚫</span><b>Kullanma</b><small>bu bölümde ara klip yok</small></div>
+    <div class="cand-actions"><button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${key}|none">${on ? '✓ Seçildi' : 'Seç'}</button></div>
+  </div>`;
 }
 function customCandHtml(sec, o, n) {
   const on = n.chosen === 'custom';
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
   return `<div class="cand custom ${on ? 'chosen' : ''}" data-cand="custom">
-    <div class="cand-media custom-media"><span>✍️</span><b>Hiçbiri</b><small>kendi linkimi vereceğim</small></div>
+    <div class="cand-media custom-media"><span>✍️</span><b>Başka klip</b><small>kendi linkimi vereceğim</small></div>
     <div class="custom-form" ${on ? '' : 'hidden'}>
       <input type="url" class="custom-url" data-custom="${key}" placeholder="YouTube / TikTok / Tenor / myinstants linki" value="${esc(n.custom?.url || '')}">
       <input type="text" class="custom-note" data-custom-note="${key}" placeholder="Not (ör. 0:12–0:15 arası)" value="${esc(n.custom?.note || '')}">
@@ -501,16 +514,36 @@ function customCandHtml(sec, o, n) {
 
 function needHtml(slug, sec, o, n) {
   const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  const head = `<div class="need-head">${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
+  const head = `<div class="need-head">${n.role ? esc(n.desc) : `${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}`}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length ? ` <span class="muted small">· ${n.chosen === 'none' ? 'kullanılmayacak' : n.chosen ? '✓ seçildi' : 'birini seç'}</span>` : ''}
     ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}
     ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎 Alakasız'}</button>` : ''}</div>
     ${n.why ? `<div class="need-why">💡 <b>Neden komik:</b> ${esc(n.why)}</div>` : ''}
     ${n.review ? `<div class="need-warn">⚠️ ${esc(n.review)}</div>` : ''}
     ${n.replaced ? `<div class="need-note">🔄 Değişti: <i>${esc(n.replaced.from)}</i> yerine${n.replaced.reason ? ` · sebep: ${esc(n.replaced.reason)}` : ''}</div>` : ''}
     ${n.feedback && !n.feedbackDone ? `<div class="need-note">👎 ${esc(n.feedback.by)}: “${esc(n.feedback.reason || 'alakasız')}” · alttan <b>Tekrar yap</b>'a basınca işlenir</div>` : ''}`;
-  return head + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
+  const label = n.role === 'cutaway' && n.label ? `<div class="cut-label"><span>${esc(n.label)}</span></div>` : '';
+  if (n.designed) return head + `<div class="designed">🎨 ${WORKER_NAME} hazırlar — seçim gerekmez.</div>`;
+  return head + label + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
 }
 
+// Örnek videolara göre (SAMPLE_BREAKDOWN): oyun üstü bindirme (≤1) + opsiyonel ara klip (≤1) + ses efekti
+const ROLE_HEAD = {
+  overlay: ['🟩 Oyun ekranına bindirme', 'Oyun görüntüsü durmadan üstüne konur.'],
+  cutaway: ['🎬 Ara klip', 'Opsiyonel. Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
+  sfx: ['🔊 Ses efekti', ''],
+  meme: ['🎬 Meme', ''],
+};
+function roleBlocksHtml(slug, sec, o) {
+  const needs = (o.needs || []).filter((n) => n.type !== 'gameplay');
+  if (!needs.length) return '<span class="muted small">Bu seçenekte meme yok, sadece oyun görüntüsü + altyazı.</span>';
+  const roleOf = (n) => n.role || (n.type === 'sfx' ? 'sfx' : 'meme');
+  return ['overlay', 'cutaway', 'meme', 'sfx'].map((r) => {
+    const list = needs.filter((n) => roleOf(n) === r);
+    if (!list.length) return '';
+    const [h, hint] = ROLE_HEAD[r];
+    return `<div class="role role-${r}"><div class="role-head">${h}${hint ? ` <span class="muted small">· ${hint}</span>` : ''}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}</div>`;
+  }).join('');
+}
 function optionHtml(sec, o, slug) {
   const on = sec.selected === o.id;
   return `<div class="opt ${on ? 'selected' : ''}" data-sec="${esc(sec.id)}" data-opt="${esc(o.id)}" role="button" tabindex="0">
@@ -521,7 +554,7 @@ function optionHtml(sec, o, slug) {
     <dl class="opt-meta">
       <dt>Ekranda</dt><dd>${esc(o.visual)}</dd>
       <dt>Ses</dt><dd>${esc(o.sound)}</dd>
-      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Meme seçmek için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${(o.needs || []).filter((n) => n.type !== 'gameplay').map((n, k, all) => `<div class="beat"><div class="beat-no">${n.type === 'sfx' ? '🔊 Ses' : '🎬 Vuruş'} ${k + 1}/${all.length}</div>${needHtml(slug, sec, o, n)}</div>`).join('') || '<span class="muted small">Bu seçenekte henüz meme yok.</span>'}
+      <dt>Meme / ses</dt><dd><div class="pick-hint">👆 Seçim yapmak için önce bu seçeneği seç. Videoları şimdiden izleyebilirsin.</div>${roleBlocksHtml(slug, sec, o)}
         <div><button type="button" class="btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Kanondan meme ekle</button></div></dd>
       ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek oyun</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
       <dt>Teknik</dt><dd>${(o.techniques || []).map((t) => `<span class="tag" title="${esc(TECH[t] || '')}">${esc(t)} ${esc(TECH[t] || '')}</span>`).join('')}</dd>
@@ -663,6 +696,7 @@ async function renderGame(slug) {
     ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
       <span class="stat"><b id="stChosen">${st.chosen}/${st.total}</b> <span class="small muted">bölüm</span></span>
       <span class="stat"><b id="stSecs">≈${st.secs}</b> <span class="small muted">sn anlatım</span></span>
+      <span class="stat" title="Seçili seçeneklerde kullanılacak tam ekran ara klip sayısı (hedef 3–4)"><b id="stCuts">${cutCount(g)}</b> <span class="small muted">ara klip</span></span>
       <span class="sec-nav">${g.sections.map((s, i) => `<button type="button" class="sec-dot ${s.selected ? 'done' : ''}" data-go="${esc(s.id)}" title="S${i + 1} · ${esc(s.title)}${s.selected ? ' · seçildi: ' + s.selected.toUpperCase() : ' · seçim yok'}">${i + 1}</button>`).join('')}</span>
       <span class="spacer"></span>
       <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
@@ -754,7 +788,9 @@ async function canonModal(onAdd) {
   draw();
 }
 
+const cutCount = (g) => g.sections.reduce((k, s) => k + ((selectedOpt(s)?.needs || []).filter((n) => n.type === 'meme' && n.chosen !== 'none' && (n.role === 'cutaway' || !n.role)).length), 0);
 function updateFooter(g) {
+  const cc = $('#stCuts'); if (cc) { const n = cutCount(g); cc.textContent = n; cc.style.color = n > 5 ? 'var(--warn)' : ''; }
   const st = stats(g);
   const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
   const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
@@ -781,7 +817,8 @@ function bindGame(g0) {
     if (!b.closest('.opt')?.classList.contains('selected')) return toast('Önce bu seçeneği seç, sonra memeyi.');
     const [sid, oid, file, cid] = b.dataset.pick.split('|');
     const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
-    const val = find(g).chosen === cid ? null : cid;
+    const nd = find(g);
+    const val = nd.chosen === cid ? (nd.optional ? 'none' : null) : cid;
     queueOp(slug, (x) => { find(x).chosen = val; }, `${file} → ${val || 'boş'}`);
     const box = b.closest('.cands');
     box.querySelectorAll('.cand').forEach((c) => {
@@ -815,7 +852,7 @@ function bindGame(g0) {
         const o = x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid);
         o.needs = o.needs || [];
         if (o.needs.some((n) => n.file === file)) return;
-        o.needs.push({ type: 'meme', file, desc: `${c.name} (${c.tr})`, at, added: true, addedBy: who,
+        o.needs.push({ type: 'meme', role: 'cutaway', optional: true, label: '', file, desc: `${c.name} (${c.tr})`, at, added: true, addedBy: who,
           candidates: [{ id: c.lib, title: c.name, source: 'canon', page: c.page, duration: c.duration, style: c.style, thumb: c.thumb, video: c.video, pvBase: '_studio/memes/previews/' }], chosen: c.lib });
       }, `${file} kanondan eklendi`);
       renderGame(slug);

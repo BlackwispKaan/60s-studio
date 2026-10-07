@@ -364,3 +364,12 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 .collecting:not(.reopen) .opt:not(.selected) { display: none; }
 .collecting:not(.reopen) .regen-btn, .collecting:not(.reopen) .note-input, .collecting:not(.reopen) .regen-btn + span { display: none; }
 .reopen-btn { margin-bottom: 8px; }
+
+/* Rol blokları (Vuruş yerine) */
+.role { margin: 8px 0 16px; }
+.role-head { font-weight: 700; font-size: 13.5px; margin-bottom: 4px; }
+.role-overlay .role-head { color: #4ade80; }
+.cut-label { background: #000; padding: 6px 10px; border-radius: 6px; margin: 4px 0 8px; display: inline-block; }
+.cut-label span { color: #fff; font-weight: 800; letter-spacing: .3px; font-size: 13px; }
+.designed { font-size: 13px; color: var(--muted); margin: 2px 0 8px; }
+.cand.none .custom-media span { font-size: 26px; }

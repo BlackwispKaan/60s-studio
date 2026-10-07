@@ -1,8 +1,13 @@
 {
- "v": 29,
- "at": "2026-10-07T03:00:01+00:00",
- "msg": "Materyal aşaması bölüm bölüm: her bölüm kendi materyalleri + Seçimi değiştir",
+ "v": 30,
+ "at": "2026-10-07T03:09:47+00:00",
+ "msg": "Vuruş kaldırıldı: Oyun ekranına bindirme + opsiyonel Ara klip (3 alternatif + Kullanma); alt barda ara klip sayacı",
  "history": [
+  {
+   "v": 30,
+   "at": "2026-10-07T03:09:47+00:00",
+   "msg": "Vuruş kaldırıldı: Oyun ekranına bindirme + opsiyonel Ara klip (3 alternatif + Kullanma); alt barda ara klip sayacı"
+  },
   {
    "v": 29,
    "at": "2026-10-07T03:00:01+00:00",
