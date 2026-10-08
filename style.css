@@ -456,3 +456,5 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
   .composer textarea { order: 3; flex-basis: 100%; }
   .composer .btn { margin-left: auto; }
 }
+.sel-diff { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px dashed var(--warn); border-radius: 10px; }
+.sel-diff b { color: var(--warn); }

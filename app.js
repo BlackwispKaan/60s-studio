@@ -179,6 +179,7 @@ async function mutateGame(slug, fn, message) {
 // Hızlı tıklamaları birleştirip tek commit olarak kaydeder.
 function queueOp(slug, op, label) {
   op(S.games.get(slug));
+  if (S.games.get(slug)?.status === 'review') setTimeout(() => refreshReviewCounts(slug), 0);
   const list = S.pending.get(slug) || [];
   list.push({ op, label });
   S.pending.set(slug, list);
@@ -691,12 +692,37 @@ function sentNotes(g, v) {
     ...(r.notes || []).map((n) => ({ ...n, rev: r })),
     ...(r.general ? [{ t: null, text: r.general, by: r.by, reply: r.generalReply, state: r.generalState, rev: r }] : []),
     ...(r.captions ? [{ t: null, text: `Altyazı → ${capLabel(r.captions)}`, by: r.by, reply: r.status === 'done' ? 'uygulandı' : '', rev: r }] : []),
+    ...(r.selection || []).map((x, k) => ({ t: null, text: `Seçim: ${x}`, by: r.by, reply: r.selectionReplies?.[k] || (r.status === 'done' ? 'uygulandı' : ''), rev: r })),
     ...(r.text && !r.notes ? [{ t: null, text: r.text, by: r.by, reply: r.reply, rev: r }] : []),
   ]).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9));
 }
+// İncelemede ekip seçimleri de değiştirebilir: sürümün `selection` anlık görüntüsüyle şimdiki seçimler karşılaştırılır.
+function selectionDiff(g) {
+  const snap = latestVersion(g)?.selection; if (!snap) return [];
+  const out = [];
+  g.sections.forEach((s, i) => {
+    const old = snap[s.id]; if (!old) return;
+    if (old.opt !== s.selected) { out.push(`S${i + 1}: seçenek ${String(old.opt || '-').toUpperCase()} → ${String(s.selected || '-').toUpperCase()}`); return; }
+    (selectedOpt(s)?.needs || []).filter((n) => n.role === 'overlay' || n.role === 'cutaway').forEach((n) => {
+      const nm = (id) => (!id || id === 'none' ? 'Kullanma' : id === 'custom' ? `Başka klip${n.custom?.url ? ` (${n.custom.url})` : ''}` : (n.candidates || []).find((c) => c.id === id)?.title || id);
+      const kind = n.role === 'cutaway' ? 'ara klip' : 'green screen';
+      const was = old.needs?.[n.file] ?? null, now = n.chosen ?? null;
+      if ((was || 'none') !== (now || 'none')) out.push(`S${i + 1} ${kind}: ${nm(was)} → ${nm(now)}`);
+      else if (now && now !== 'none' && (old.at?.[n.file] || '') !== (n.at || '')) out.push(`S${i + 1} ${kind} giriş anı → “${n.at || 'otomatik'}”`);
+    });
+  });
+  return out;
+}
 function pendingChanges(g) {
   const lv = latestVersion(g); if (!lv) return 0;
-  return draftNotes(g, lv.v).length + ((g.reviewGeneral || '').trim() ? 1 : 0) + (lv.captions && g.settings?.captions !== lv.captions ? 1 : 0);
+  return draftNotes(g, lv.v).length + ((g.reviewGeneral || '').trim() ? 1 : 0) + (lv.captions && g.settings?.captions !== lv.captions ? 1 : 0) + selectionDiff(g).length;
+}
+const selDiffHtml = (g) => { const d = selectionDiff(g); return d.length ? `<div class="sel-diff"><b class="small">Seçim değişiklikleri</b>${d.map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>` : ''; };
+function refreshReviewCounts(slug) {
+  const g = S.games.get(slug); const rb = $('#rebuildBtn'); if (!g || !rb) return;
+  const n = pendingChanges(g);
+  rb.disabled = !n; rb.textContent = `🔄 Videoyu yeniden oluştur${n ? ` (${n})` : ''}`;
+  const d = $('#selDiffBox'); if (d) d.innerHTML = selDiffHtml(g);
 }
 function notesHtml(g, sel, canEdit, busy) {
   const lv = latestVersion(g);
@@ -755,6 +781,7 @@ function reviewHtml(g) {
         <div class="row"><span class="small" style="font-weight:600">Altyazı</span>
           <div class="seg" id="capSegR">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" title="${esc(c.hint)}">${c.label}</button>`).join('')}</div>
           ${lv.captions && g.settings.captions !== lv.captions ? `<span class="small" style="color:var(--warn)">v${lv.v}'de “${esc(capLabel(lv.captions))}” · yeniden oluşturunca değişir</span>` : ''}</div>
+        <div id="selDiffBox">${selDiffHtml(g)}</div>
         <textarea id="revGeneral" class="note-input" rows="2" placeholder="Genel not (opsiyonel): videonun bütünüyle ilgili istek">${esc(g.reviewGeneral || '')}</textarea>
         <div class="row"><button class="btn btn-primary" id="rebuildBtn" ${pend ? '' : 'disabled'}>🔄 Videoyu yeniden oluştur${pend ? ` (${pend})` : ''}</button>
           <span class="small muted">${WORKER_NAME} notları uygular, v${lv.v + 1}'i hazırlar.</span><span class="spacer"></span>
@@ -830,8 +857,9 @@ function bindReview(slug) {
       await mutateGame(slug, (x) => {
         const notes = (x.reviewNotes || []).filter((m) => m.v === lv.v).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9)).map(({ v: _v, ...m }) => m);
         const capChanged = lv.captions && x.settings.captions !== lv.captions;
+        const selection = selectionDiff(x);
         (x.revisions = x.revisions || []).push({ id, at: nowIso(), by: S.user, v: lv.v, notes, general: (x.reviewGeneral || '').trim(),
-          ...(capChanged ? { captions: x.settings.captions } : {}), status: 'queued' });
+          ...(capChanged ? { captions: x.settings.captions } : {}), ...(selection.length ? { selection } : {}), status: 'queued' });
         x.reviewNotes = (x.reviewNotes || []).filter((m) => m.v !== lv.v);
         x.reviewGeneral = '';
         x.status = 'queued_revision';
@@ -882,7 +910,7 @@ async function renderGame(slug) {
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
       ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length && !reviewing && !['choosing', 'queued_regen'].includes(g.status) ? materialsHtml(g) : ''}
       ${stale ? `<div class="card" style="border-color:var(--warn)">⚠️ Seçimler çıktıdan sonra değişti. Materyal listesini güncellemek için <b>Çıktı al</b>'a tekrar bas.</div>` : ''}
-      ${g.sections?.length && reviewing ? `<details class="card script-details"><summary><b>📝 Senaryo ve seçimler</b> <span class="small muted">· salt okunur; değişiklik için videoya not yazın</span></summary>
+      ${g.sections?.length && reviewing ? `<details class="card script-details"><summary><b>📝 Senaryo ve seçimler</b> <span class="small muted">· ${g.status === 'review' ? 'meme / seçenek değiştirebilirsiniz; değişiklikler “Videoyu yeniden oluştur”a eklenir' : 'salt okunur'}</span></summary>
         <div class="stack" style="margin-top:14px">${g.sections.map((s, i) => sectionHtml(s, i, false, g.opening, g.slug, g)).join('')}</div></details>` : ''}
       ${g.sections?.length && !reviewing ? `
         <section class="card">
@@ -1066,6 +1094,7 @@ function bindGame(g0) {
   const cur = () => S.games.get(slug);
   const g = new Proxy({}, { get: (_, k) => cur()[k] });
   const editable = ['choosing', 'collecting'].includes(g.status);
+  const selEditable = editable || g.status === 'review'; // incelemede de meme/seçenek seçimi değişebilir
   const take = $('#takeOwner');
   if (take) take.onclick = () => { queueOp(slug, (x) => { x.owners = [...new Set([...owners(x), S.user])]; x.owner = x.owners[0]; logLine(x, `${S.user} projeye katıldı.`); }, 'çalışan eklendi'); renderGame(slug); };
   $('#editGame').onclick = () => editGameModal(slug);
@@ -1074,7 +1103,7 @@ function bindGame(g0) {
   document.querySelectorAll('.cand-media[data-play]').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
   document.querySelectorAll('.cand-pick').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     if (!b.closest('.opt')?.classList.contains('selected')) return toast('Önce bu seçeneği seç, sonra memeyi.');
     const [sid, oid, file, cid] = b.dataset.pick.split('|');
     const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
@@ -1106,7 +1135,7 @@ function bindGame(g0) {
   // + Kanondan meme ekle
   document.querySelectorAll('.canon-add').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     const [sid, oid] = b.dataset.canonAdd.split('|');
     canonModal(async (c, at) => {
       const idx = g.sections.findIndex((s) => s.id === sid) + 1;
@@ -1126,7 +1155,7 @@ function bindGame(g0) {
   const clean = (t) => t.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
   document.querySelectorAll('.at-chip').forEach((chip) => chip.onclick = (ev) => {
     ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     document.querySelectorAll('.at-picker').forEach((x) => x.remove());
     const [sid, oid, file] = chip.dataset.at.split('|');
     const opt = g.sections.find((x) => x.id === sid).options.find((x) => x.id === oid);
@@ -1181,7 +1210,7 @@ function bindGame(g0) {
   });
   document.querySelectorAll('.canon-into').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     const [sid, oid, file] = b.dataset.canonInto.split('|');
     canonModal((c) => {
       queueOp(slug, (x) => {
@@ -1198,7 +1227,7 @@ function bindGame(g0) {
   });
   document.querySelectorAll('.green-add').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     const [sid, oid, file] = b.dataset.greenAdd.split('|');
     greensModal((c) => {
       queueOp(slug, (x) => {
@@ -1242,7 +1271,7 @@ function bindGame(g0) {
   document.querySelectorAll('.opt').forEach((btn) => btn.onclick = (ev) => {
     if (ev.target.closest('.cands, .refs, .at-picker')) return;
     if (ev.target.closest('.peek-btn')) { const on = btn.classList.toggle('peek'); ev.target.textContent = on ? '▾ ayrıntıları gizle' : '▸ ayrıntıları göster'; return; }
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
+    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
     const sid = btn.dataset.sec, oid = btn.dataset.opt;
     const sec = g.sections.find((s) => s.id === sid);
     const val = sec.selected === oid ? null : oid;
