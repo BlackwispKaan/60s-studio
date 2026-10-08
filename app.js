@@ -6,6 +6,9 @@ const REPO = { owner: 'BlackwispKaan', repo: 'Youtube', branch: 'main' };
 const WORKER_NAME = 'Askeri Ücretli Çalışan'; // arka plan Claude'un ekipteki adı
 const DEFAULT_MEMBERS = ['Kağan', 'Samet', 'Yiğit'];
 const WORDS_PER_SEC = 2.6; // ~155 kelime/dk anlatım hızı
+// Geçici bakım modu (Kağan 2026-10-08): site ve worker durduruldu. Açmak için false yapıp deploy_site.sh ile yayınla
+// (worker: Görev Zamanlayıcı "60sStudioWorker" yeniden etkinleştirilir).
+const MAINTENANCE = true;
 
 const STATUS = {
   queued_research: { label: 'Araştırma sırada', step: 0 },
@@ -1631,6 +1634,7 @@ async function checkVersion() {
 
 /* ---------- router / boot ---------- */
 async function route() {
+  if (MAINTENANCE) return;
   if (!S.user) { $('#app').innerHTML = `<div class="card empty"><h2>Önce sağ üstten ismini seç 👆</h2></div>`; return; }
   const h = location.hash.replace(/^#/, '') || '/';
   const m = h.match(/^\/game\/(.+)$/);
@@ -1668,6 +1672,12 @@ window.addEventListener('hashchange', () => { window.scrollTo(0, 0); route(); })
 window.addEventListener('beforeunload', (e) => { if ([...S.pending.values()].some((l) => l.length)) { e.preventDefault(); e.returnValue = ''; } });
 
 (function init() {
+  if (MAINTENANCE) {
+    $('#app').innerHTML = `<div class="card empty"><h2>⏸ 60s Studio geçici olarak kapalı</h2>
+      <p class="muted">Site ve ${WORKER_NAME} şu an durduruldu. Yeniden açıldığında kaldığımız yerden devam edeceğiz; oyunlar, seçimler ve videolar yerinde duruyor.</p></div>`;
+    const us = $('#userSelect'); if (us) us.disabled = true;
+    return;
+  }
   const tok = ls.get('studio.token');
   const local = ['localhost', '127.0.0.1'].includes(location.hostname);
   if (tok) S.store = new GitHubStore(tok);
