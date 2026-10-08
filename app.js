@@ -123,7 +123,11 @@ class LocalDemoStore {
   }
   async put(path, text) { this.mem.set(path, text); return {}; }
   async del(path) { this.mem.set(path, null); return {}; }
-  async blobUrl(path) { return `../${path}`; }
+  async blobUrl(path) {
+    // GitHub'daki gibi blob: oynatıcıda ileri/geri sarma yerel sunucunun Range desteğine bağlı kalmasın
+    const r = await fetch(`../${path}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return URL.createObjectURL(await r.blob());
+  }
   async commits() {
     // Demo: commit yok, oyunların log kayıtlarından üret
     return [...S.games.values()].flatMap((g) => (g.log || []).map((l) => ({ msg: `[${l.by}] ${g.title}: ${l.msg}`, at: l.at })))
@@ -148,6 +152,9 @@ const S = {
   games: new Map(), // slug -> game
   pending: new Map(), // slug -> [ops]
   saveTimers: new Map(),
+  revView: {}, // slug -> incelenen sürüm
+  revTime: {}, // slug -> oynatıcı konumu (yeniden çizimde korunur)
+  revDraft: {}, // slug -> yazılmakta olan not
 };
 
 async function readJSON(path) { const f = await S.store.get(path); return f ? { data: JSON.parse(f.text), sha: f.sha } : null; }
@@ -179,16 +186,25 @@ function queueOp(slug, op, label) {
   setSaveState('saving');
   S.saveTimers.set(slug, setTimeout(() => flush(slug), 900));
 }
+// Süren bir kayıt varsa önce onu bekler: "Not ekle"den hemen sonra "Yeniden oluştur"a basılınca not kaybolmasın.
+const flushing = new Map();
 async function flush(slug) {
+  const prev = flushing.get(slug);
+  if (prev) await prev;
   const list = S.pending.get(slug) || [];
   if (!list.length) return;
   S.pending.set(slug, []);
-  try {
-    await mutateGame(slug, (g) => list.forEach((x) => x.op(g)), [...new Set(list.map((x) => x.label))].join(', '));
-    setSaveState('saved');
-  } catch (e) {
-    console.error(e); setSaveState('error'); toast('Kaydedilemedi: ' + e.message, true);
-  }
+  const p = (async () => {
+    try {
+      await mutateGame(slug, (g) => list.forEach((x) => x.op(g)), [...new Set(list.map((x) => x.label))].join(', '));
+      setSaveState('saved');
+    } catch (e) {
+      console.error(e); setSaveState('error'); toast('Kaydedilemedi: ' + e.message, true);
+    }
+  })();
+  flushing.set(slug, p);
+  await p;
+  if (flushing.get(slug) === p) flushing.delete(slug);
 }
 function setSaveState(s) {
   const el = $('#saveState'); if (!el) return;
@@ -665,17 +681,173 @@ function materialsHtml(g) {
   </section>`;
 }
 
+/* ---------- İnceleme: sürümler + oynatıcı + zaman damgalı notlar → "yeniden oluştur" ---------- */
+const fmtT = (t) => (t == null ? 'Genel' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`);
+const latestVersion = (g) => (g.versions || []).reduce((a, v) => (!a || v.v > a.v ? v : a), null);
+const draftNotes = (g, v) => (g.reviewNotes || []).filter((n) => n.v === v).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9));
+const capLabel = (v) => CAPTIONS.find((c) => c.v === v)?.label || v;
+function sentNotes(g, v) {
+  return (g.revisions || []).filter((r) => r.v === v).flatMap((r) => [
+    ...(r.notes || []).map((n) => ({ ...n, rev: r })),
+    ...(r.general ? [{ t: null, text: r.general, by: r.by, reply: r.generalReply, state: r.generalState, rev: r }] : []),
+    ...(r.captions ? [{ t: null, text: `Altyazı → ${capLabel(r.captions)}`, by: r.by, reply: r.status === 'done' ? 'uygulandı' : '', rev: r }] : []),
+    ...(r.text && !r.notes ? [{ t: null, text: r.text, by: r.by, reply: r.reply, rev: r }] : []),
+  ]).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9));
+}
+function pendingChanges(g) {
+  const lv = latestVersion(g); if (!lv) return 0;
+  return draftNotes(g, lv.v).length + ((g.reviewGeneral || '').trim() ? 1 : 0) + (lv.captions && g.settings?.captions !== lv.captions ? 1 : 0);
+}
+function notesHtml(g, sel, canEdit, busy) {
+  const lv = latestVersion(g);
+  const drafts = canEdit && sel.v === lv.v ? draftNotes(g, sel.v) : [];
+  const sent = sentNotes(g, sel.v);
+  if (!drafts.length && !sent.length) return canEdit && sel.v === lv.v ? '<p class="small muted" style="margin:0">Henüz not yok. Videoyu durdurduğun anda yazdığın not o saniyeye bağlanır.</p>' : '';
+  return drafts.map((n) => `<div class="note"><button type="button" class="note-t tl-go" data-t="${n.t ?? 0}">${fmtT(n.t)}</button>
+      <div class="note-body">${esc(n.text)}<div class="small muted">${esc(n.by)} · gönderilmedi</div></div>
+      <button type="button" class="note-del" data-del-note="${esc(n.id)}" title="Notu sil">✕</button></div>`).join('')
+    + sent.map((n) => `<div class="note sent"><button type="button" class="note-t tl-go" data-t="${n.t ?? 0}">${fmtT(n.t)}</button>
+      <div class="note-body">${esc(n.text)}<div class="small muted">${esc(n.by || n.rev.by)} · ${n.rev.via === 'sohbet' ? 'sohbetten aktarıldı' : fmtDate(n.rev.at)}</div>
+      ${n.reply ? `<div class="note-reply ${esc(n.state || '')}">${n.state === 'skipped' ? '↷' : n.state === 'question' ? '❓' : '✓'} ${esc(n.reply)}${n.rev.outV ? ` <span class="muted">→ v${n.rev.outV}</span>` : ''}</div>`
+        : `<div class="note-reply wait">${busy ? `⏳ ${WORKER_NAME} uyguluyor` : 'sırada'}</div>`}</div></div>`).join('');
+}
 function reviewHtml(g) {
-  const vs = g.versions || [];
-  return `<section class="card stack" id="review">
-    <h2>🎬 Videolar</h2>
-    ${vs.length ? `<div>${vs.slice().reverse().map((v) => `<div class="version"><b>v${v.v}</b><span class="small muted">${fmtDate(v.at)}</span><span class="small">${esc(v.notes || '')}</span><span class="spacer"></span>${v.url ? `<a class="btn btn-primary" href="${esc(v.url)}" target="_blank" rel="noopener">İzle ↗</a>` : `<code class="small">${esc(v.file || '')}</code>`}</div>`).join('')}</div>` : '<p class="muted">Henüz video yok.</p>'}
-    ${g.status === 'review' ? `
-      <div class="field"><label for="revIn">Düzeltme isteği</label>
-        <textarea id="revIn" rows="4" placeholder="Örn: 0:12'deki meme çok uzun, kısalt. S5'te B seçeneğini dene. Altyazı biraz daha büyük olsun."></textarea></div>
-      <div class="row"><button class="btn btn-primary" id="revSend">Düzeltme gönder</button><button class="btn" id="approve">✓ Onayla, bitti</button></div>` : ''}
-    ${(g.revisions || []).length ? `<details><summary>Düzeltme geçmişi (${g.revisions.length})</summary>${g.revisions.map((r) => `<div class="version"><span class="small muted">${fmtDate(r.at)} · ${esc(r.by)}</span><span>${esc(r.text)}</span><span class="pill">${r.status === 'done' ? 'yapıldı' : 'sırada'}</span></div>`).join('')}</details>` : ''}
+  const vs = (g.versions || []).slice().sort((a, b) => a.v - b.v);
+  if (!vs.length) return `<section class="card" id="review"><h2>🎬 Kurgu</h2><p class="muted">Henüz video yok.</p></section>`;
+  const lv = latestVersion(g);
+  const busy = ['queued_edit', 'editing', 'queued_revision'].includes(g.status);
+  const canEdit = g.status === 'review';
+  const sel = vs.find((v) => v.v === S.revView[g.slug]) || lv;
+  const live = canEdit && sel.v === lv.v;
+  const ICON = { section: '📍', cutaway: '🎞', overlay: '🟩' };
+  const KIND = { cutaway: 'ara klip', overlay: 'green screen' };
+  const tl = sel.timeline || [];
+  const pend = pendingChanges(g);
+  return `<section class="card review" id="review">
+    <div class="row"><h2>🎬 Kurgu</h2>
+      <div class="seg ver-seg">${vs.map((v) => `<button type="button" data-ver="${v.v}" class="${v.v === sel.v ? 'on' : ''}">v${v.v}</button>`).join('')}</div>
+      <span class="spacer"></span>
+      <span class="small muted">${sel.duration ? `${Math.round(sel.duration)} sn · ` : ''}${sel.captions ? `altyazı: ${esc(capLabel(sel.captions))} · ` : ''}${fmtDate(sel.at)}</span>
+    </div>
+    ${sel.notes ? `<p class="small ver-notes"><b>${esc(sel.by || WORKER_NAME)}:</b> ${esc(sel.notes)}</p>` : ''}
+    <div class="review-grid">
+      <div class="player">
+        ${sel.preview ? `<video id="revVideo" playsinline controls preload="auto" data-src="${esc(sel.preview)}"></video><div class="player-loading" id="revLoading"><span class="spinner"></span></div>`
+          : `<div class="player-empty small muted">Bu sürümün site önizlemesi yok (sadece son sürümler tutulur).<br>Drive: <code>${esc((sel.file || '').split(/[\\/]/).slice(-2).join('/'))}</code></div>`}
+        <div class="small muted player-meta">Önizleme 720p · tam kalite Drive'da: <code>${esc((sel.file || '').split(/[\\/]/).slice(-2).join('/'))}</code> ${driveLink(g, 'link-btn')}</div>
+      </div>
+      <div class="side">
+        <div class="side-title">Ekranda neler var <span class="small muted">· tıklayınca o ana gider</span></div>
+        <div class="tl-list">${tl.length ? tl.map((it) => `<div class="tl-row tl-${esc(it.type)}">
+            <button type="button" class="tl-go" data-t="${it.t}"><span class="tl-time">${fmtT(it.t)}</span><span class="tl-ico">${ICON[it.type] || '•'}</span>
+              <span class="tl-label">${it.type === 'section' ? `<b>${esc(it.sec)}</b> ${esc(it.label)}` : `${esc(it.label)} <span class="muted">(${KIND[it.type] || it.type})</span>`}</span></button>
+            ${live && it.type !== 'section' ? `<button type="button" class="tl-act" data-note-at="${it.t}" data-note-label="${esc(it.label)}" title="Bu öğe için not yaz">✎</button><button type="button" class="tl-act" data-rm-at="${it.t}" data-rm-label="${esc(it.label)}" title="“Kaldırılsın” notu ekle">🗑</button>` : ''}
+          </div>`).join('') : '<p class="small muted">Bu sürüm için zaman çizelgesi yok.</p>'}</div>
+      </div>
+    </div>
+    ${live ? `<div class="composer">
+        <button type="button" class="pill note-time" id="noteTime" title="Notun bağlanacağı an. Tıklayınca videonun şu anki zamanını alır.">⏱ <span>0:00</span></button>
+        <textarea id="noteText" rows="2" placeholder="Bu anda ne değişsin? Örn: “green screen yanlış yerde, kaldır”. Ctrl+Enter ile ekle."></textarea>
+        <button type="button" class="btn btn-primary" id="noteAdd">Not ekle</button>
+      </div>` : ''}
+    <div class="notes" id="revNotes">${notesHtml(g, sel, canEdit, busy)}</div>
+    ${live ? `<div class="review-foot">
+        <div class="row"><span class="small" style="font-weight:600">Altyazı</span>
+          <div class="seg" id="capSegR">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" title="${esc(c.hint)}">${c.label}</button>`).join('')}</div>
+          ${lv.captions && g.settings.captions !== lv.captions ? `<span class="small" style="color:var(--warn)">v${lv.v}'de “${esc(capLabel(lv.captions))}” · yeniden oluşturunca değişir</span>` : ''}</div>
+        <textarea id="revGeneral" class="note-input" rows="2" placeholder="Genel not (opsiyonel): videonun bütünüyle ilgili istek">${esc(g.reviewGeneral || '')}</textarea>
+        <div class="row"><button class="btn btn-primary" id="rebuildBtn" ${pend ? '' : 'disabled'}>🔄 Videoyu yeniden oluştur${pend ? ` (${pend})` : ''}</button>
+          <span class="small muted">${WORKER_NAME} notları uygular, v${lv.v + 1}'i hazırlar.</span><span class="spacer"></span>
+          <button class="btn" id="approve">✓ Onayla, bitti</button></div>
+      </div>` : ''}
+    ${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${g.status === 'queued_edit' ? 'kurguya başlayacak' : g.status === 'editing' ? `çalışıyor: v${lv.v + 1} hazırlanıyor` : `notları sıraya aldı: v${lv.v + 1} hazırlanacak`}. Bitince burada görünür.</div>` : ''}
+    ${g.status === 'done' ? `<div class="small" style="color:var(--good)">✓ Onaylandı. Yayın için tam kalite dosya Drive'da.</div>` : ''}
   </section>`;
+}
+
+function bindReview(slug) {
+  const cur = () => S.games.get(slug);
+  const rerender = () => { const v = $('#revVideo'); if (v) S.revTime[slug] = v.currentTime; const t = $('#noteText'); if (t) S.revDraft[slug] = t.value; renderGame(slug); };
+  document.querySelectorAll('.ver-seg button').forEach((b) => b.onclick = () => { S.revView[slug] = +b.dataset.ver; S.revTime[slug] = 0; renderGame(slug); });
+  const v = $('#revVideo');
+  let noteT = null; // notun bağlanacağı an (null = oynatıcının anlık zamanı)
+  const tEl = $('#noteTime span');
+  const now = () => (v ? Math.round(v.currentTime * 10) / 10 : 0);
+  const showT = () => { if (tEl) tEl.textContent = fmtT(noteT ?? now()); };
+  if (v) {
+    bindMedia(v);
+    blob(v.dataset.src).then((u) => {
+      v.src = u; $('#revLoading')?.remove();
+      if (S.revTime[slug]) v.addEventListener('loadedmetadata', () => { v.currentTime = S.revTime[slug]; showT(); }, { once: true });
+    }).catch(() => { const l = $('#revLoading'); if (l) l.innerHTML = '<span class="small muted">Video yüklenemedi</span>'; });
+    v.addEventListener('timeupdate', () => { if (noteT == null) showT(); });
+    v.addEventListener('play', () => { noteT = null; showT(); });
+  }
+  const seek = (t) => { if (!v) return; v.currentTime = Math.max(0, +t || 0); noteT = null; showT(); };
+  document.querySelectorAll('.tl-go').forEach((b) => b.onclick = () => seek(b.dataset.t));
+  const txt = $('#noteText');
+  const addNote = (t, text) => {
+    const lv = latestVersion(cur());
+    const n = { id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), v: lv.v, t: t == null ? null : Math.round(t * 10) / 10, text, by: S.user, at: nowIso() };
+    queueOp(slug, (x) => { (x.reviewNotes = x.reviewNotes || []).push(n); }, `v${lv.v} notu ${fmtT(n.t)}`);
+  };
+  if (txt) {
+    txt.value = S.revDraft[slug] || '';
+    txt.onfocus = () => { if (v && !v.paused) v.pause(); if (noteT == null) noteT = now(); showT(); };
+    txt.onkeydown = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#noteAdd').click(); } };
+    $('#noteAdd').onclick = () => {
+      const text = txt.value.trim(); if (!text) return txt.focus();
+      addNote(noteT ?? now(), text); S.revDraft[slug] = ''; txt.value = ''; noteT = null; rerender();
+    };
+  }
+  $('#noteTime')?.addEventListener('click', () => { noteT = now(); showT(); });
+  document.querySelectorAll('[data-note-at]').forEach((b) => b.onclick = () => {
+    seek(b.dataset.noteAt); noteT = +b.dataset.noteAt; showT();
+    if (txt) { txt.value = `${b.dataset.noteLabel}: `; txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length); }
+  });
+  document.querySelectorAll('[data-rm-at]').forEach((b) => b.onclick = () => {
+    addNote(+b.dataset.rmAt, `${b.dataset.rmLabel}: kaldırılsın`); toast('Not eklendi: kaldırılsın'); rerender();
+  });
+  document.querySelectorAll('[data-del-note]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.delNote;
+    queueOp(slug, (x) => { x.reviewNotes = (x.reviewNotes || []).filter((n) => n.id !== id); }, 'not silindi'); rerender();
+  });
+  document.querySelectorAll('#capSegR button').forEach((b) => b.onclick = () => {
+    const c = b.dataset.cap; queueOp(slug, (x) => { x.settings.captions = c; }, `altyazı: ${c}`); rerender();
+  });
+  const gen = $('#revGeneral');
+  if (gen) gen.onchange = () => { const val = gen.value; queueOp(slug, (x) => { x.reviewGeneral = val; }, 'genel not'); rerender(); };
+  const rb = $('#rebuildBtn');
+  if (rb) rb.onclick = async () => {
+    if (gen && gen.value !== (cur().reviewGeneral || '')) { const val = gen.value; queueOp(slug, (x) => { x.reviewGeneral = val; }, 'genel not'); }
+    await flush(slug);
+    const g = cur(); const lv = latestVersion(g); const n = pendingChanges(g);
+    if (!n) return toast('Gönderilecek not yok');
+    if (!confirm(`${n} değişiklik ${WORKER_NAME}'a gönderilsin mi? v${lv.v + 1} hazırlanacak.`)) return;
+    rb.disabled = true;
+    const id = 'r' + Date.now().toString(36);
+    try {
+      await mutateGame(slug, (x) => {
+        const notes = (x.reviewNotes || []).filter((m) => m.v === lv.v).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9)).map(({ v: _v, ...m }) => m);
+        const capChanged = lv.captions && x.settings.captions !== lv.captions;
+        (x.revisions = x.revisions || []).push({ id, at: nowIso(), by: S.user, v: lv.v, notes, general: (x.reviewGeneral || '').trim(),
+          ...(capChanged ? { captions: x.settings.captions } : {}), status: 'queued' });
+        x.reviewNotes = (x.reviewNotes || []).filter((m) => m.v !== lv.v);
+        x.reviewGeneral = '';
+        x.status = 'queued_revision';
+        logLine(x, `v${lv.v} için ${notes.length} not gönderildi, yeniden oluşturma istendi.`);
+      }, `v${lv.v} düzeltme istendi`);
+      await enqueue('revise', slug, { revision: id });
+      toast('Kuyruğa alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rb.disabled = false; }
+  };
+  const ap = $('#approve');
+  if (ap) ap.onclick = async () => {
+    if (pendingChanges(cur()) && !confirm('Gönderilmemiş notlar var. Yine de onaylansın mı?')) return;
+    await flush(slug);
+    await mutateGame(slug, (x) => { x.status = 'done'; logLine(x, `v${latestVersion(x).v} onaylandı.`); }, 'onaylandı');
+    toast('Tebrikler! 🎉'); renderGame(slug);
+  };
 }
 
 async function renderGame(slug) {
@@ -688,6 +860,7 @@ async function renderGame(slug) {
   }
   const g = S.games.get(slug);
   const editable = ['choosing', 'collecting'].includes(g.status);
+  const reviewing = (g.versions || []).length > 0 && ['queued_edit', 'editing', 'queued_revision', 'review', 'done'].includes(g.status);
   const st = stats(g);
   const stale = g.status === 'collecting' && g.exportSig && g.exportSig !== selectionSig(g);
   app.innerHTML = `
@@ -704,12 +877,14 @@ async function renderGame(slug) {
       ${workerBanner()}
       ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? `${WORKER_NAME} araştırıyor…` : `${WORKER_NAME} araştırma yapacak`}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
       ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>${WORKER_NAME} yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
-      ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
+      ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) && !reviewing ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
       ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
-      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length && !['choosing', 'queued_regen'].includes(g.status) ? materialsHtml(g) : ''}
+      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length && !reviewing && !['choosing', 'queued_regen'].includes(g.status) ? materialsHtml(g) : ''}
       ${stale ? `<div class="card" style="border-color:var(--warn)">⚠️ Seçimler çıktıdan sonra değişti. Materyal listesini güncellemek için <b>Çıktı al</b>'a tekrar bas.</div>` : ''}
-      ${g.sections?.length ? `
+      ${g.sections?.length && reviewing ? `<details class="card script-details"><summary><b>📝 Senaryo ve seçimler</b> <span class="small muted">· salt okunur; değişiklik için videoya not yazın</span></summary>
+        <div class="stack" style="margin-top:14px">${g.sections.map((s, i) => sectionHtml(s, i, false, g.opening, g.slug, g)).join('')}</div></details>` : ''}
+      ${g.sections?.length && !reviewing ? `
         <section class="card">
           <div class="row"><h2>Altyazı</h2><span class="spacer"></span>
             <div class="seg" id="capSeg">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" ${editable ? '' : 'disabled'}>${c.label}</button>`).join('')}</div></div>
@@ -1170,21 +1345,7 @@ function bindGame(g0) {
       toast('Kurgu kuyruğa alındı ✓'); renderGame(slug);
     } catch (e) { toast('Başlatılamadı: ' + e.message, true); start.disabled = false; }
   };
-  const rev = $('#revSend');
-  if (rev) rev.onclick = async () => {
-    const text = $('#revIn').value.trim(); if (!text) return;
-    rev.disabled = true;
-    try {
-      await mutateGame(slug, (x) => { (x.revisions = x.revisions || []).push({ at: nowIso(), by: S.user, text, status: 'queued' }); x.status = 'queued_revision'; logLine(x, 'Düzeltme istendi.'); }, 'düzeltme istendi');
-      await enqueue('revise', slug, { text });
-      toast('Düzeltme kuyruğa alındı ✓'); renderGame(slug);
-    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rev.disabled = false; }
-  };
-  const ap = $('#approve');
-  if (ap) ap.onclick = async () => {
-    await mutateGame(slug, (x) => { x.status = 'done'; logLine(x, 'Video onaylandı.'); }, 'onaylandı');
-    toast('Tebrikler! 🎉'); renderGame(slug);
-  };
+  bindReview(slug);
 }
 
 function exportModal(g) {

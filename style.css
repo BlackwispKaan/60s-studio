@@ -405,3 +405,54 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; width: 210px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 .vol-pop[hidden] { display: none; }
 .vol-pop input[type=range] { width: 100%; accent-color: var(--accent); }
+
+/* İnceleme: sürümler + oynatıcı + zaman damgalı notlar */
+.review .ver-seg button { padding: 4px 10px; font-size: 13px; }
+.ver-notes { margin: 10px 0 0; color: var(--muted); }
+.review-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: start; }
+.player { position: relative; min-width: 0; }
+.player video { display: block; width: 100%; aspect-ratio: 9 / 16; max-height: 72vh; background: #000; border-radius: 10px; }
+.player-loading { position: absolute; left: 0; right: 0; top: 0; aspect-ratio: 9 / 16; max-height: 72vh; display: grid; place-items: center; pointer-events: none; }
+.player-empty { aspect-ratio: 9 / 16; max-height: 72vh; display: grid; place-items: center; text-align: center; background: var(--surface-2); border-radius: 10px; padding: 16px; }
+.player-meta { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.player-meta code { font-size: 12px; }
+.side { min-width: 0; }
+.side-title { font-weight: 600; margin-bottom: 6px; }
+.tl-list { display: flex; flex-direction: column; gap: 1px; max-height: 72vh; overflow: auto; padding-right: 2px; }
+.tl-row { display: flex; align-items: stretch; gap: 2px; }
+.tl-go { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; text-align: left; background: transparent; border: 0; border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+.tl-go:hover { background: var(--surface-2); }
+.tl-time { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; font-size: 13px; min-width: 34px; }
+.tl-ico { font-size: 13px; }
+.tl-label { font-size: 14px; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tl-section { margin-top: 6px; }
+.tl-section:first-child { margin-top: 0; }
+.tl-section .tl-label { color: var(--muted); font-size: 13px; }
+.tl-section .tl-label b { color: var(--text); }
+.tl-row:not(.tl-section) .tl-go { padding-left: 22px; }
+.tl-act { background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer; padding: 0 8px; opacity: .6; }
+.tl-act:hover { opacity: 1; border-color: var(--border); background: var(--surface-2); }
+.composer { display: flex; gap: 8px; align-items: flex-start; margin-top: 16px; }
+.composer textarea { flex: 1; min-width: 0; resize: vertical; }
+.note-time { cursor: pointer; white-space: nowrap; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.notes { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.note { display: flex; gap: 10px; align-items: flex-start; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.note.sent { background: transparent; }
+.note-t { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); background: transparent; border: 0; cursor: pointer; padding: 1px 0 0; min-width: 42px; text-align: left; font-size: 13px; }
+.note-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.note-reply { margin-top: 6px; font-size: 13px; color: var(--good); }
+.note-reply.skipped, .note-reply.question { color: var(--warn); }
+.note-reply.wait { color: var(--info); }
+.note-del { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 2px 6px; }
+.note-del:hover { color: var(--bad); }
+.review-foot { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.busy-note { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--info); border-radius: 10px; }
+.script-details > summary { cursor: pointer; }
+@media (max-width: 760px) {
+  .review-grid { grid-template-columns: minmax(0, 1fr); }
+  .player video, .player-loading, .player-empty { max-height: 68vh; }
+  .tl-list { max-height: 46vh; }
+  .composer { flex-wrap: wrap; }
+  .composer textarea { order: 3; flex-basis: 100%; }
+  .composer .btn { margin-left: auto; }
+}
