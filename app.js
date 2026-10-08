@@ -8,7 +8,7 @@ const DEFAULT_MEMBERS = ['Kağan', 'Samet', 'Yiğit'];
 const WORDS_PER_SEC = 2.6; // ~155 kelime/dk anlatım hızı
 // Geçici bakım modu (Kağan 2026-10-08): site ve worker durduruldu. Açmak için false yapıp deploy_site.sh ile yayınla
 // (worker: Görev Zamanlayıcı "60sStudioWorker" yeniden etkinleştirilir).
-const MAINTENANCE = true;
+const MAINTENANCE = false;
 
 const STATUS = {
   queued_research: { label: 'Araştırma sırada', step: 0 },
