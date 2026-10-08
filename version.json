@@ -1,8 +1,13 @@
 {
- "v": 44,
- "at": "2026-10-08T13:08:51+00:00",
- "msg": "Bakım modu kapatıldı: site ve worker yeniden açık",
+ "v": 45,
+ "at": "2026-10-08T15:15:31+00:00",
+ "msg": "Zaman çizelgesinde ses efekti satırı",
  "history": [
+  {
+   "v": 45,
+   "at": "2026-10-08T15:15:31+00:00",
+   "msg": "Zaman çizelgesinde ses efekti satırı"
+  },
   {
    "v": 44,
    "at": "2026-10-08T13:08:51+00:00",
@@ -97,11 +102,6 @@
    "v": 26,
    "at": "2026-10-06T23:56:21+00:00",
    "msg": "⏱ etiketi: 'giriş anı' olarak netleştirildi"
-  },
-  {
-   "v": 25,
-   "at": "2026-10-06T22:55:30+00:00",
-   "msg": "Meme vuruşlarında 'Neden komik' satırı, 👎 Alakasız geri bildirimi, Tekrar yap ile işlenmesi"
   }
  ]
 }

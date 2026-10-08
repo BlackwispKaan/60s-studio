@@ -748,8 +748,8 @@ function reviewHtml(g) {
   const canEdit = g.status === 'review';
   const sel = vs.find((v) => v.v === S.revView[g.slug]) || lv;
   const live = canEdit && sel.v === lv.v;
-  const ICON = { section: '📍', cutaway: '🎞', overlay: '🟩' };
-  const KIND = { cutaway: 'ara klip', overlay: 'green screen' };
+  const ICON = { section: '📍', cutaway: '🎞', overlay: '🟩', sfx: '🔊' };
+  const KIND = { cutaway: 'ara klip', overlay: 'green screen', sfx: 'ses efekti' };
   const tl = sel.timeline || [];
   const pend = pendingChanges(g);
   return `<section class="card review" id="review">
