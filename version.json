@@ -1,8 +1,13 @@
 {
- "v": 45,
- "at": "2026-10-08T15:15:31+00:00",
- "msg": "Zaman çizelgesinde ses efekti satırı",
+ "v": 46,
+ "at": "2026-10-09T16:33:10+00:00",
+ "msg": "YouTube kanal bağlantısı (üst bar + ana sayfa), son aşamada yayın linki alanı, kartta Yayında rozeti",
  "history": [
+  {
+   "v": 46,
+   "at": "2026-10-09T16:33:10+00:00",
+   "msg": "YouTube kanal bağlantısı (üst bar + ana sayfa), son aşamada yayın linki alanı, kartta Yayında rozeti"
+  },
   {
    "v": 45,
    "at": "2026-10-08T15:15:31+00:00",
@@ -97,11 +102,6 @@
    "v": 27,
    "at": "2026-10-07T00:09:34+00:00",
    "msg": "⏱ kelime seçici; seçilen bölümde diğer seçenekler katlanır; alt barda S1–S9 kısayolları; mobil üst bar taşması düzeltildi"
-  },
-  {
-   "v": 26,
-   "at": "2026-10-06T23:56:21+00:00",
-   "msg": "⏱ etiketi: 'giriş anı' olarak netleştirildi"
   }
  ]
 }

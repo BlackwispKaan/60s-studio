@@ -226,6 +226,14 @@ details summary { cursor: pointer; font-weight: 600; }
 .icon-btn.sm { width: 30px; height: 30px; font-size: 15px; }
 .drive-link { gap: 6px; }
 .drive-link svg { flex: none; }
+.yt-link { gap: 6px; }
+.yt-link svg { flex: none; }
+.yt-channel { align-self: flex-start; gap: 8px; margin-top: 6px; }
+.yt-channel svg { flex: none; }
+.st-published { color: #ff4d4d; }
+.pub-box { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.pub-form { flex: 1 1 100%; gap: 8px; }
+.pub-form input { flex: 1; min-width: 0; }
 .game-card { cursor: pointer; }
 .game-card.archived { opacity: .55; }
 .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 14px; }

@@ -157,6 +157,7 @@ const S = {
   saveTimers: new Map(),
   revView: {}, // slug -> incelenen sürüm
   revTime: {}, // slug -> oynatıcı konumu (yeniden çizimde korunur)
+  pubEdit: {}, // slug -> yayın linki düzenleniyor
   revDraft: {}, // slug -> yazılmakta olan not
 };
 
@@ -361,7 +362,10 @@ async function loadGames() {
   games.filter(Boolean).forEach((g) => S.games.set(g.data.slug, g.data));
 }
 
-function statusPill(g) { const s = STATUS[g.status] || { label: g.status }; return `<span class="pill dot st-${esc(g.status)}">${esc(s.label)}</span>`; }
+function statusPill(g) {
+  if (g.status === 'done' && g.published?.url) return '<span class="pill dot st-published">Yayında</span>';
+  const s = STATUS[g.status] || { label: g.status }; return `<span class="pill dot st-${esc(g.status)}">${esc(s.label)}</span>`;
+}
 
 async function renderHome() {
   const app = $('#app');
@@ -383,6 +387,7 @@ async function renderHome() {
     <div class="hero">
       <h1>60 saniyede oyunlar</h1>
       <p class="muted" style="margin:0">Yeni bir oyun yaz. ${WORKER_NAME} araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
+      ${channelButton()}
     </div>
     ${workerBanner()}
     ${S.store.demo ? '<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">⚠️ <b>Demo modu</b>: yerel dosyalar okunuyor, değişiklikler kaydedilmez. Kaydetmek için ⚙ ile token gir.</div>' : ''}
@@ -398,7 +403,7 @@ async function renderHome() {
       const s = stats(g);
       return `<div class="card game-card ${g.archived ? 'archived' : ''}" data-open="${esc(g.slug)}" role="link" tabindex="0">
         <div class="row">${statusPill(g)}<span class="spacer"></span>
-          ${driveLink(g, 'icon-btn sm')}
+          ${ytLink(g)}${driveLink(g, 'icon-btn sm')}
           <button class="icon-btn sm" data-edit="${esc(g.slug)}" title="Projeyi düzenle" aria-label="Projeyi düzenle">⋯</button></div>
         <h3 lang="en">${esc(g.title)}</h3>
         <div class="progress"><span style="width:${Math.round((st / 5) * 100)}%"></span></div>
@@ -448,6 +453,31 @@ function ownersHtml(g, strong = false) {
   return `<span class="owners" title="${esc(os.join(', '))}"><span class="heads">${os.map(headSvg).join('')}</span>${os.map((n) => `<span class="owner-name" style="color:${memberColor(n)}${strong ? ';font-weight:600' : ''}">${esc(n)}</span>`).join('<span class="muted">,</span> ')}</span>`;
 }
 const DRIVE_SVG = '<svg viewBox="0 0 87.3 78" width="16" height="16" aria-hidden="true"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
+const YT_SVG = '<svg viewBox="0 0 28 20" width="20" height="14" aria-hidden="true"><rect width="28" height="20" rx="5" fill="#FF0000"/><path d="M11.2 5.6v8.8L18.8 10z" fill="#fff"/></svg>';
+// Yayınlanan videonun linki (Kağan 2026-10-09): son aşamada elle girilir — iki "GTA 5" projesi olduğundan başlıkla otomatik
+// eşleme yanlış videoyu bağlayabilir; yükleme ileride API ile otomatikleşirse link de otomatik yazılır.
+function ytId(u) { const m = String(u || '').match(/(?:youtube\.com\/(?:shorts\/|watch\?(?:.*&)?v=|embed\/|live\/)|youtu\.be\/)([\w-]{11})/); return m ? m[1] : null; }
+function ytLink(g, cls = 'icon-btn sm') {
+  const url = g?.published?.url;
+  if (!url) return '';
+  return `<a class="${cls} yt-link" href="${esc(url)}" target="_blank" rel="noopener" title="YouTube'da izle" aria-label="YouTube'da izle" onclick="event.stopPropagation()">${YT_SVG}${cls === 'btn' ? "<span>YouTube'da izle</span>" : ''}</a>`;
+}
+function channelButton() {
+  const y = S.config?.youtube;
+  if (!y?.channelUrl) return '';
+  return `<a class="btn yt-channel" href="${esc(y.channelUrl)}" target="_blank" rel="noopener">${YT_SVG}<span><b>${esc(y.name || 'YouTube')}</b> kanalımız · ${esc(y.handle || '')}</span></a>`;
+}
+function publishBox(g) {
+  const p = g.published;
+  if (p?.url && !S.pubEdit[g.slug]) {
+    return `<div class="pub-box"><span class="small" style="color:var(--good)">✓ Yayında</span>${ytLink(g, 'btn')}
+      <span class="small muted">${esc(p.by || '')}${p.at ? ' · ' + esc(String(p.at).slice(0, 10)) : ''}</span><span class="spacer"></span>
+      <button type="button" class="btn btn-ghost small" id="pubEdit">Linki değiştir</button></div>`;
+  }
+  return `<div class="pub-box"><span class="small" style="color:var(--good)">✓ Onaylandı. Yayın için tam kalite dosya Drive'da.</span>
+    <div class="row pub-form"><input type="url" id="pubUrl" placeholder="Yayınlandıysa YouTube linkini yapıştır (youtube.com/shorts/…)" value="${esc(p?.url || '')}">
+      <button type="button" class="btn btn-primary" id="pubSave">Kaydet</button>${p?.url ? '<button type="button" class="btn btn-ghost" id="pubCancel">Vazgeç</button>' : ''}</div></div>`;
+}
 function driveLink(g, cls = 'btn') {
   const url = g?.settings?.mediaFolderUrl;
   if (!url) return '';
@@ -791,12 +821,26 @@ function reviewHtml(g) {
           <button class="btn" id="approve">✓ Onayla, bitti</button></div>
       </div>` : ''}
     ${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${g.status === 'queued_edit' ? 'kurguya başlayacak' : g.status === 'editing' ? `çalışıyor: v${lv.v + 1} hazırlanıyor` : `notları sıraya aldı: v${lv.v + 1} hazırlanacak`}. Bitince burada görünür.</div>` : ''}
-    ${g.status === 'done' ? `<div class="small" style="color:var(--good)">✓ Onaylandı. Yayın için tam kalite dosya Drive'da.</div>` : ''}
+    ${g.status === 'done' ? publishBox(g) : ''}
   </section>`;
 }
 
 function bindReview(slug) {
   const cur = () => S.games.get(slug);
+  const ps = $('#pubSave');
+  if (ps) ps.onclick = async () => {
+    const raw = $('#pubUrl').value.trim(); const id = ytId(raw);
+    if (!id) { toast('Bu bir YouTube video linki değil (youtube.com/shorts/… ya da youtu.be/…)', true); return; }
+    const url = /\/shorts\//.test(raw) ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`;
+    ps.disabled = true;
+    try {
+      await mutateGame(slug, (x) => { x.published = { url, videoId: id, at: nowIso(), by: S.user }; logLine(x, `Yayın linki eklendi: ${url}`); }, 'yayın linki');
+      S.pubEdit[slug] = false; toast('Yayın linki kaydedildi ✓'); renderGame(slug);
+    } catch (e) { toast('Kaydedilemedi: ' + e.message, true); ps.disabled = false; }
+  };
+  const pu = $('#pubUrl'); if (pu) pu.onkeydown = (e) => { if (e.key === 'Enter') $('#pubSave')?.click(); };
+  const pe = $('#pubEdit'); if (pe) pe.onclick = () => { S.pubEdit[slug] = true; renderGame(slug); };
+  const pc = $('#pubCancel'); if (pc) pc.onclick = () => { S.pubEdit[slug] = false; renderGame(slug); };
   const rerender = () => { const v = $('#revVideo'); if (v) S.revTime[slug] = v.currentTime; const t = $('#noteText'); if (t) S.revDraft[slug] = t.value; renderGame(slug); };
   document.querySelectorAll('.ver-seg button').forEach((b) => b.onclick = () => { S.revView[slug] = +b.dataset.ver; S.revTime[slug] = 0; renderGame(slug); });
   const v = $('#revVideo');
@@ -1655,6 +1699,7 @@ async function boot() {
   try {
     const c = await readJSON('config/studio.json'); S.config = c?.data || {};
     const a = $('#driveRoot'); if (a && S.config.driveRootUrl) { a.href = S.config.driveRootUrl; a.innerHTML = DRIVE_SVG; a.hidden = false; }
+    const y = $('#ytChannel'); if (y && S.config.youtube?.channelUrl) { y.href = S.config.youtube.channelUrl; y.innerHTML = YT_SVG; y.title = `YouTube: ${S.config.youtube.name} (${S.config.youtube.handle})`; y.hidden = false; }
   } catch {}
   if (S.user && !S.members.includes(S.user)) S.user = null;
   initVolumeControl();
