@@ -1,8 +1,13 @@
 {
- "v": 49,
- "at": "2026-10-10T13:47:29+00:00",
- "msg": "Ben: hesaba kilitliyken açılır liste oku gösterilmiyor",
+ "v": 50,
+ "at": "2026-10-10T15:40:03+00:00",
+ "msg": "Kullanım limiti: Türkçe ve devam saatli gösterim (eski 'hata' kayıtları da limit sayılır); önerilen oyunlar Oyunlar bölümünün altında",
  "history": [
+  {
+   "v": 50,
+   "at": "2026-10-10T15:40:03+00:00",
+   "msg": "Kullanım limiti: Türkçe ve devam saatli gösterim (eski 'hata' kayıtları da limit sayılır); önerilen oyunlar Oyunlar bölümünün altında"
+  },
   {
    "v": 49,
    "at": "2026-10-10T13:47:29+00:00",
@@ -97,11 +102,6 @@
    "v": 31,
    "at": "2026-10-07T03:20:21+00:00",
    "msg": "Tekrar eden açıklamalar kaldırıldı (üzerine gelince ipucu)"
-  },
-  {
-   "v": 30,
-   "at": "2026-10-07T03:09:47+00:00",
-   "msg": "Vuruş kaldırıldı: Oyun ekranına bindirme + opsiyonel Ara klip (3 alternatif + Kullanma); alt barda ara klip sayacı"
   }
  ]
 }
