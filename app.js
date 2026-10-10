@@ -1,33 +1,57 @@
 /* 60s Studio — veri özel GitHub reposunda (BlackwispKaan/Youtube) durur.
    Site her kullanıcının kendi GitHub token'ıyla GitHub API üzerinden okur/yazar.
-   localhost'ta token yoksa "demo modu": dosyaları yerel sunucudan okur, yazmaz. */
+   localhost'ta token yoksa "demo modu": dosyaları yerel sunucudan okur, yazmaz.
+   Akış (Kağan 2026-10-10): Araştırma → Metin → Materyal → Kontrol → Kurgu → Ses → İnceleme → Yayın. */
 
 const REPO = { owner: 'BlackwispKaan', repo: 'Youtube', branch: 'main' };
-const WORKER_NAME = 'Askeri Ücretli Çalışan'; // arka plan Claude'un ekipteki adı
+const API = `https://api.github.com/repos/${REPO.owner}/${REPO.repo}`;
+const WORKER_NAME = 'Çırak'; // arka plan Claude'un ekipteki adı (eski: Askeri Ücretli Çalışan)
+// Yönetici (Kağan 2026-10-10): oyun silme + entegrasyonlar yalnız onun. Kimlik "Ben:" listesinden değil token'ın GitHub
+// hesabından gelir; bu site kodu yalnız Kağan'ın yayınlayabildiği ayrı repoda durduğu için eşleme ekipçe değiştirilemez.
+const ADMIN = { name: 'Kağan', login: 'BlackwispKaan' };
+const LOGINS = { BlackwispKaan: 'Kağan', alonehunter: 'Samet', pirocuksuz: 'Yiğit' };
 const DEFAULT_MEMBERS = ['Kağan', 'Samet', 'Yiğit'];
+const CLOSING = 'Follow for more games in 60 seconds.';
 const WORDS_PER_SEC = 2.6; // ~155 kelime/dk anlatım hızı
+const UPLOAD_MAX = 75 * 1024 * 1024; // GitHub blob sınırı 100 MB; base64 ile istek ~%33 büyür
 // Geçici bakım modu (Kağan 2026-10-08): site ve worker durduruldu. Açmak için false yapıp deploy_site.sh ile yayınla
 // (worker: Görev Zamanlayıcı "60sStudioWorker" yeniden etkinleştirilir).
 const MAINTENANCE = false;
 
 const STATUS = {
-  queued_research: { label: 'Araştırma sırada', step: 0 },
-  researching:     { label: 'Araştırılıyor', step: 0 },
-  queued_regen:    { label: 'Yeniden öneriliyor', step: 1 },
-  choosing:        { label: 'Seçim yapılıyor', step: 1 },
-  collecting:      { label: 'Materyal toplanıyor', step: 2 },
-  queued_edit:     { label: 'Kurgu sırada', step: 3 },
-  editing:         { label: 'Kurgulanıyor', step: 3 },
-  queued_revision: { label: 'Düzeltme sırada', step: 3 },
-  review:          { label: 'İncelemede', step: 4 },
-  done:            { label: 'Tamamlandı', step: 5 },
+  queued_research:  { label: 'Araştırma sırada', step: 0 },
+  researching:      { label: 'Araştırılıyor', step: 0 },
+  script:           { label: 'Metin seçiliyor', step: 1 },
+  queued_regen:     { label: 'Yeniden öneriliyor', step: 1 },
+  queued_materials: { label: 'Materyal sırada', step: 2 },
+  gathering:        { label: 'Materyal toplanıyor', step: 2 },
+  materials:        { label: 'Materyal kontrolü', step: 3 },
+  queued_build:     { label: 'Kurgu sırada', step: 4 },
+  drafting:         { label: 'Kurgulanıyor', step: 4 },
+  voicing:          { label: 'Seslendiriliyor', step: 5 },
+  review:           { label: 'İncelemede', step: 6 },
+  queued_revision:  { label: 'Düzeltme sırada', step: 6 },
+  revising:         { label: 'Düzeltiliyor', step: 6 },
+  done:             { label: 'Tamamlandı', step: 7 },
 };
-const STEPS = ['Araştırma', 'Seçim', 'Materyal', 'Kurgu', 'İnceleme', 'Bitti'];
-const TECH = {
-  T1: 'Literalizasyon', T2: 'Etiket + reaksiyon', T3: 'Ciddi söz / ters görüntü', T4: 'Belgesel dili',
-  T5: 'Övgü → itiraf', T6: 'Topluluk klişesi', T7: 'Hard cut / sessizlik', T8: 'SFX punch', T9: 'Callback', T10: 'Espriye bağlı CTA',
+const LEGACY_STATUS = { choosing: 'script', collecting: 'materials', queued_edit: 'queued_build', editing: 'drafting' };
+const stOf = (g) => LEGACY_STATUS[g.status] || g.status;
+const STEPS = [
+  { name: 'Araştırma', who: 'w', tip: `${WORKER_NAME} oyunu ve topluluğun esprilerini (Reddit, Steam, YouTube yorumları…) araştırır, her bölüm için 3 metin seçeneği yazar.` },
+  { name: 'Metin', who: 't', tip: 'Ekip her bölüm için bir replik seçer. Burada meme, ses efekti, süre yok.' },
+  { name: 'Materyal', who: 'w', tip: `${WORKER_NAME} oyun görüntülerini, ara klipleri, green screen memeleri ve ses efektlerini bulur.` },
+  { name: 'Kontrol', who: 't', tip: 'Ekip materyalleri kontrol eder: eksik görüntüyü yükler ya da link verir, beğenmediğini değiştirir.' },
+  { name: 'Kurgu', who: 'w', tip: `${WORKER_NAME} süreleri belirleyen ilk deneme videosunu (taslak, geçici sesle) kurar.` },
+  { name: 'Ses', who: 'w', tip: `${WORKER_NAME} anlatıcı sesini (ElevenLabs) ve ses miksajını ekler.` },
+  { name: 'İnceleme', who: 't', tip: 'Ekip izler, not yazar, materyal değiştirir → yeni sürüm.' },
+  { name: 'Yayın', who: 't', tip: 'Onaylandı; YouTube linki eklenir.' },
+];
+const KIND = {
+  gp:      { label: 'Oyun görüntüsü', icon: '🎮' },
+  cutaway: { label: 'Ara klip', icon: '🎬', hint: 'Oyun durur, etiketli tam ekran klip girer (videoda toplam 3–4 yeterli).' },
+  green:   { label: 'Green screen', icon: '🟩', hint: 'Oyun görüntüsü durmadan üstüne bindirilir.' },
+  sfx:     { label: 'Ses efekti', icon: '🔊', hint: 'Seçilen kelimede çalar.' },
 };
-const TYPE_LABEL = { gameplay: 'Oyun', meme: 'Meme', sfx: 'Ses efekti', voice: 'Anlatıcı' };
 const CAPTIONS = [
   { v: 'full', label: 'Tam altyazı', hint: 'Anlatıcının her kelimesi ekranda. Önerilen: sessiz izleyenler ve anadili İngilizce olmayan global izleyici için en yüksek izlenme süresi.' },
   { v: 'keywords', label: 'Vurgu kelimeleri', hint: 'Sadece punchline ve anahtar kelimeler ekranda. Görüntü daha temiz kalır.' },
@@ -36,6 +60,7 @@ const CAPTIONS = [
 
 /* ---------- utils ---------- */
 const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ls = {
   get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
@@ -52,13 +77,25 @@ function b64dec(b64) {
   const bin = atob(b64.replace(/\n/g, ''));
   return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
 }
+function fileToB64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1] || '');
+    r.onerror = () => rej(r.error || new Error('Dosya okunamadı'));
+    r.readAsDataURL(file);
+  });
+}
 function slugify(t) {
   const map = { ç: 'c', ğ: 'g', ı: 'i', İ: 'i', ö: 'o', ş: 's', ü: 'u' };
   return t.trim().toLowerCase().replace(/[çğıİöşü]/g, (c) => map[c] || c)
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
 }
+const safeName = (n) => (String(n).normalize('NFKD').replace(/[^\w.-]+/g, '_').replace(/^_+/, '') || 'dosya').slice(-80);
 const nowIso = () => new Date().toISOString();
+const newId = (p = 'm') => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return iso; } };
+const fmtSize = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const shortUrl = (u) => { try { const x = new URL(u); return x.hostname.replace(/^www\./, '') + (x.pathname.length > 1 ? x.pathname.slice(0, 24) + (x.pathname.length > 24 ? '…' : '') : ''); } catch { return u; } };
 function toast(msg, err = false) {
   const t = $('#toast');
   t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false;
@@ -70,17 +107,20 @@ function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = '
 /* ---------- storage backends ---------- */
 class GitHubStore {
   constructor(token) { this.token = token; this.demo = false; }
+  hdr(extra = {}) { return { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...extra }; }
   async req(path, opts = {}) {
     // Sondaki '/' GitHub'da CORS'suz hata döndürür (tarayıcıda "Failed to fetch"), o yüzden boş path'te eklenmez.
-    const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}${path ? '/' + path : ''}`, {
-      ...opts, cache: 'no-store',
-      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers || {}) },
-    });
+    const r = await fetch(`${API}${path ? '/' + path : ''}`, { ...opts, cache: 'no-store', headers: this.hdr(opts.headers || {}) });
     if (r.status === 404) return null;
     if (!r.ok) { const e = new Error(`GitHub ${r.status}`); e.status = r.status; e.body = await r.text(); throw e; }
     return r.status === 204 ? {} : r.json();
   }
   async ping() { return this.req(''); }
+  // Token'ın sahibi (GitHub hesabı): "Ben:" seçimi ve yönetici yetkisi buna bağlı
+  async whoami() {
+    const r = await fetch('https://api.github.com/user', { cache: 'no-store', headers: this.hdr() });
+    return r.ok ? (await r.json()).login : null;
+  }
   async get(path) {
     const j = await this.req(`contents/${encodeURI(path)}?ref=${REPO.branch}&t=${Date.now()}`);
     return j ? { text: b64dec(j.content), sha: j.sha } : null;
@@ -106,21 +146,44 @@ class GitHubStore {
   }
   // Özel repodaki ikili dosyayı (önizleme jpg/mp4/mp3) blob URL olarak döndürür.
   async blobUrl(path) {
-    const r = await fetch(`https://api.github.com/repos/${REPO.owner}/${REPO.repo}/contents/${encodeURI(path)}?ref=${REPO.branch}`, {
-      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' },
-    });
+    const r = await fetch(`${API}/contents/${encodeURI(path)}?ref=${REPO.branch}`, { headers: this.hdr({ Accept: 'application/vnd.github.raw' }) });
     if (!r.ok) throw new Error(`GitHub ${r.status}`);
     // GitHub raw yanıtı octet-stream döner; <video>/<audio> için doğru türü veriyoruz.
     const type = { mp4: 'video/mp4', mp3: 'audio/mpeg', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif' }[path.split('.').pop()] || '';
     return URL.createObjectURL(new Blob([await r.arrayBuffer()], { type }));
+  }
+  // Dosya yükleme: tek dosyalık YETİM dala (upload/<slug>/<uid>) yazılır, ana dal şişmez; Çırak dosyayı Drive'a alınca dalı
+  // siler (media.py ingest). uploads.github.com tarayıcıya CORS izni vermiyor, git veri API'si veriyor.
+  async uploadFile(file, branch, path, onProgress) {
+    const b64 = await fileToB64(file);
+    const blob = await new Promise((res, rej) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', `${API}/git/blobs`);
+      Object.entries(this.hdr({ 'Content-Type': 'application/json' })).forEach(([k, v]) => x.setRequestHeader(k, v));
+      x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+      x.onload = () => (x.status < 300 ? res(JSON.parse(x.responseText))
+        : rej(Object.assign(new Error(`GitHub ${x.status}`), { status: x.status, body: x.responseText })));
+      x.onerror = () => rej(new Error('Bağlantı koptu'));
+      x.send(JSON.stringify({ content: b64, encoding: 'base64' }));
+    });
+    const post = async (p, body) => {
+      const r = await this.req(p, { method: 'POST', body: JSON.stringify(body) });
+      if (!r) throw Object.assign(new Error('GitHub 404 (yazma izni yok)'), { status: 404 });
+      return r;
+    };
+    const tree = await post('git/trees', { tree: [{ path, mode: '100644', type: 'blob', sha: blob.sha }] });
+    const commit = await post('git/commits', { message: `[${S.user}] yükleme: ${path}`, tree: tree.sha, parents: [] });
+    await post('git/refs', { ref: `refs/heads/${branch}`, sha: commit.sha });
+    return { branch, path };
   }
 }
 class LocalDemoStore {
   // localhost'ta proje klasörü sunuluyorsa (site/ bir alt klasör) dosyaları okur; yazmalar sadece bellekte.
   constructor() { this.demo = true; this.mem = new Map(); }
   async ping() { return {}; }
+  async whoami() { return ls.get('studio.demoLogin', ADMIN.login); } // demo: ?login denemesi için localStorage
   async get(path) {
-    if (this.mem.has(path)) return { text: this.mem.get(path), sha: 'mem' };
+    if (this.mem.has(path)) { const t = this.mem.get(path); return t === null ? null : { text: t, sha: 'mem' }; }
     const r = await fetch(`../${path}`, { cache: 'no-store' });
     return r.ok ? { text: await r.text(), sha: 'local' } : null;
   }
@@ -131,6 +194,10 @@ class LocalDemoStore {
     const r = await fetch(`../${path}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return URL.createObjectURL(await r.blob());
   }
+  async uploadFile(file, branch, path, onProgress) {
+    for (let i = 1; i <= 10; i++) { await new Promise((r) => setTimeout(r, 150)); onProgress?.(i / 10); }
+    return { branch, path };
+  }
   async commits() {
     // Demo: commit yok, oyunların log kayıtlarından üret
     return [...S.games.values()].flatMap((g) => (g.log || []).map((l) => ({ msg: `[${l.by}] ${g.title}: ${l.msg}`, at: l.at })))
@@ -138,10 +205,10 @@ class LocalDemoStore {
   }
   async list(path) {
     const r = await fetch(`../${path}/`, { cache: 'no-store' });
-    if (!r.ok) return [];
-    const html = await r.text();
+    const html = r.ok ? await r.text() : '';
     const names = [...html.matchAll(/href="([^"?#]+)"/g)].map((m) => decodeURIComponent(m[1]));
-    const fromMem = [...this.mem.keys()].filter((k) => k.startsWith(path + '/')).map((k) => { const rest = k.slice(path.length + 1); return rest.includes('/') ? rest.split('/')[0] + '/' : rest; });
+    const fromMem = [...this.mem.entries()].filter(([k, v]) => v !== null && k.startsWith(path + '/'))
+      .map(([k]) => { const rest = k.slice(path.length + 1); return rest.includes('/') ? rest.split('/')[0] + '/' : rest; });
     return [...new Set([...names, ...fromMem])].filter((n) => !n.startsWith('.') && !n.startsWith('/'))
       .map((n) => ({ name: n.replace(/\/$/, ''), type: n.endsWith('/') ? 'dir' : 'file' }));
   }
@@ -151,6 +218,7 @@ class LocalDemoStore {
 const S = {
   store: null,
   user: ls.get('studio.user'),
+  login: null, // token'ın GitHub hesabı
   members: DEFAULT_MEMBERS,
   games: new Map(), // slug -> game
   pending: new Map(), // slug -> [ops]
@@ -159,7 +227,13 @@ const S = {
   revTime: {}, // slug -> oynatıcı konumu (yeniden çizimde korunur)
   pubEdit: {}, // slug -> yayın linki düzenleniyor
   revDraft: {}, // slug -> yazılmakta olan not
+  mediaOpen: {}, // slug -> incelemede materyal kartı açık mı
+  uploading: new Map(), // "sid|eid" -> {pct, name, size}
+  localMedia: new Map(), // yükleme uid -> bu oturumdaki yerel önizleme (object URL)
+  cats: {}, // katalog önbelleği
 };
+const isAdmin = () => !!S.login && S.login === ADMIN.login;
+const lockedName = () => LOGINS[S.login] || null;
 
 async function readJSON(path) { const f = await S.store.get(path); return f ? { data: JSON.parse(f.text), sha: f.sha } : null; }
 
@@ -183,7 +257,7 @@ async function mutateGame(slug, fn, message) {
 // Hızlı tıklamaları birleştirip tek commit olarak kaydeder.
 function queueOp(slug, op, label) {
   op(S.games.get(slug));
-  if (S.games.get(slug)?.status === 'review') setTimeout(() => refreshReviewCounts(slug), 0);
+  setTimeout(() => updateCounts(slug), 0);
   const list = S.pending.get(slug) || [];
   list.push({ op, label });
   S.pending.set(slug, list);
@@ -220,74 +294,79 @@ async function enqueue(type, slug, payload = {}) {
   const at = nowIso();
   const name = `queue/${at.replace(/[-:.]/g, '').slice(0, 15)}-${type}-${slug}.json`;
   await S.store.put(name, JSON.stringify({ type, slug, by: S.user, at, payload }, null, 2) + '\n', `[${S.user}] iş kuyruğu: ${type} ${slug}`);
+  return name;
 }
 const logLine = (g, msg) => (g.log = g.log || []).push({ at: nowIso(), by: S.user, msg });
+const whoName = (n) => (n === 'Askeri Ücretli Çalışan' || n === 'Claude (worker)' ? WORKER_NAME : n);
 
 /* ---------- derived ---------- */
-const selectedOpt = (sec) => sec.options.find((o) => o.id === sec.selected);
+const selectedOpt = (sec) => (sec.options || []).find((o) => o.id === sec.selected);
+const isV2 = (g) => (g.schema || 1) >= 2;
 function stats(g) {
   const secs = g.sections || [];
-  const chosen = secs.filter((s) => s.selected);
+  const chosen = secs.filter((s) => selectedOpt(s));
   const words = chosen.reduce((n, s) => n + selectedOpt(s).narration.split(/\s+/).length, 0);
   return { total: secs.length, chosen: chosen.length, words, secs: Math.round(words / WORDS_PER_SEC) };
 }
-function buildMaterials(g) {
-  const prev = new Map((g.materials || []).map((m) => [m.file || m.id, m]));
-  const out = []; const seen = new Set();
-  const add = (m) => { const k = m.file || m.id; if (seen.has(k)) return; seen.add(k); const p = prev.get(k); out.push({ ...m, done: p ? !!p.done : false, doneBy: p?.doneBy || null }); };
-  g.sections.forEach((s, i) => {
-    (s.gameplay || []).forEach((x) => add({ id: x.id, type: 'gameplay', section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '' }));
-    const o = selectedOpt(s);
-    (o?.needs || []).forEach((x, j) => {
-      if (x.type === 'sfx') return;  // ses efektleri ekibe sorulmaz; worker kurguda seçer
-      const base = { id: `${s.id}${o.id}n${j}`, type: x.type, section: `S${i + 1}`, desc: x.desc, file: x.file, source: x.source || '', search: x.search || '', refs: x.refs || [] };
-      if (x.chosen === 'none') return;
-      if (x.designed) {
-        out.push({ ...base, auto: true, chosen: 'designed', chosenTitle: `Tasarım: ${x.desc}`, chosenExplicit: true, done: true, doneBy: WORKER_NAME });
-        seen.add(base.file); return;
-      }
-      if (x.candidates?.length) {
-        // Meme/sfx adaylarını Claude indirdi; ekip sadece seçer. Seçilmezse ilk aday kullanılır.
-        if (x.chosen === 'custom' && x.custom?.url) {
-          out.push({ ...base, auto: true, chosen: 'custom', chosenTitle: `Kendi linki: ${x.custom.url}${x.custom.note ? ` (${x.custom.note})` : ''}`, customUrl: x.custom.url, chosenExplicit: true, done: true, doneBy: WORKER_NAME });
-          seen.add(base.file);
-          return;
-        }
-        const c = x.candidates.find((k) => k.id === x.chosen) || x.candidates[0];
-        out.push({ ...base, auto: true, chosen: c.id, chosenTitle: c.title, chosenExplicit: !!x.chosen && x.chosen !== 'custom', done: true, doneBy: WORKER_NAME });
-        seen.add(base.file);
-      } else add(base);
+const mediaOf = (s) => (s.media = s.media || { gameplay: [], items: [] });
+const secIdx = (g, sid) => g.sections.findIndex((s) => s.id === sid);
+function findEntry(g, sid, eid) {
+  const s = g.sections.find((x) => x.id === sid); if (!s) return null;
+  const m = mediaOf(s);
+  return (m.gameplay || []).find((x) => x.id === eid) || (m.items || []).find((x) => x.id === eid) || null;
+}
+const entryKind = (x) => x.kind || 'gp';
+const missingSecs = (g) => (g.sections || []).filter((s) => !((s.media?.gameplay || []).some((x) => x.src)));
+function itemCounts(g) {
+  const c = { cutaway: 0, green: 0, sfx: 0 };
+  (g.sections || []).forEach((s) => (s.media?.items || []).forEach((x) => { c[x.kind] = (c[x.kind] || 0) + 1; }));
+  return c;
+}
+// Materyal anlık görüntüsü — _studio/tools/media.py snapshot() ile AYNI biçim (Çırak sürüm yayınlarken mediaBase yazar).
+const srcKey = (src) => (src && (src.uid || src.url || src.id || src.lib)) || '';
+function mediaSnapshot(g) {
+  const out = {};
+  (g.sections || []).forEach((s) => {
+    const m = s.media || {};
+    [...(m.gameplay || []).map((x) => ['gp', x]), ...(m.items || []).map((x) => [x.kind, x])].forEach(([kind, x]) => {
+      (out[s.id] = out[s.id] || {})[x.id] = [JSON.stringify([kind, srcKey(x.src), x.at || '', x.range || '', x.label || '']), x.title || x.desc || ''];
     });
   });
   return out;
 }
-function missingChoices(g) {
-  // Seçili seçeneklerde, adayı olan ama ekibin henüz seçim yapmadığı meme/sfx ihtiyaçları
-  return g.sections.flatMap((s) => (selectedOpt(s)?.needs || []).filter((n) => n.type !== 'sfx' && n.candidates?.length && (!n.chosen || (n.chosen === 'custom' && !n.custom?.url))));
-}
-function materialsMarkdown(g) {
-  // Ekip için sade liste: hangi bölüm, ne kaydedilecek, hangi adla. Claude/worker'ın kendi hazırladıkları (meme/sfx/anlatım) burada yok.
-  const mats = g.materials.filter((m) => !m.auto);
-  const folder = g.settings?.mediaFolderUrl ? `[Drive: ${g.slug}](${g.settings.mediaFolderUrl})` : `Drive'daki \`${g.slug}/\` klasörü`;
-  const icon = { gameplay: '🎮', meme: '😂', sfx: '🔊' };
-  const secs = g.sections.map((s, i) => {
-    const items = mats.filter((m) => m.section === `S${i + 1}`);
-    if (!items.length) return '';
-    return `## S${i + 1} · ${s.time} — ${s.title}\n${items.map((m) => `- [${m.done ? 'x' : ' '}] ${icon[m.type] || '•'} \`${m.file}\` — ${m.desc}${m.type !== 'gameplay' && m.search ? ` (ara: "${m.search}")` : ''}`).join('\n')}`;
-  }).filter(Boolean).join('\n\n');
-  return `# ${g.title} — Toplanacak materyaller (${mats.length})
-
-Hepsini ${folder} içine, **tam olarak yazan dosya adıyla** koyun.
-Klipleri 2 sn kadar uzun kesin, kırpmayı ${WORKER_NAME} yapar. Mümkünse 1080p.
-
-${secs || '_Sizden istenen materyal yok._'}
-`;
+// İncelemede ekibin materyal değişiklikleri (son sürüme göre) → "Videoyu yeniden oluştur"a eklenir
+function mediaDiff(g) {
+  if (!isV2(g) || !g.mediaBase) return [];
+  const cur = mediaSnapshot(g), base = g.mediaBase, out = [];
+  const kindTr = (sig) => { try { return (KIND[JSON.parse(sig)[0]]?.label || 'materyal').toLowerCase(); } catch { return 'materyal'; } };
+  g.sections.forEach((s, i) => {
+    const a = base[s.id] || {}, b = cur[s.id] || {};
+    Object.entries(b).forEach(([id, [sig, label]]) => {
+      if (!a[id]) out.push(`S${i + 1} ${kindTr(sig)} eklendi: ${label}`);
+      else if (a[id][0] !== sig) out.push(`S${i + 1} ${kindTr(sig)} değişti: ${label}`);
+    });
+    Object.entries(a).forEach(([id, [sig, label]]) => { if (!b[id]) out.push(`S${i + 1} ${kindTr(sig)} kaldırıldı: ${label}`); });
+  });
+  return out;
 }
 
-/* ---------- views ---------- */
+/* ---------- kimlik ---------- */
 function renderUserSelect() {
   const sel = $('#userSelect');
-  sel.innerHTML = (S.user ? '' : '<option value="">İsmini seç</option>') + S.members.map((m) => `<option ${m === S.user ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  const fixed = lockedName();
+  if (fixed) {
+    sel.innerHTML = `<option selected>${esc(fixed)}${fixed === ADMIN.name ? ' 👑' : ''}</option>`;
+    sel.disabled = true;
+    sel.title = `GitHub hesabın: ${S.login}${isAdmin() ? ' · yönetici' : ''}`;
+    return;
+  }
+  // Tanınmayan hesap: Kağan'ın adı (yönetici) ve başka hesaplara bağlı adlar seçilemez
+  const mapped = Object.values(LOGINS);
+  let free = S.members.filter((m) => m !== ADMIN.name && !mapped.includes(m));
+  if (!free.length) free = S.members.filter((m) => m !== ADMIN.name);
+  sel.disabled = false;
+  sel.title = S.login ? `GitHub hesabın: ${S.login}` : '';
+  sel.innerHTML = (S.user ? '' : '<option value="">İsmini seç</option>') + free.map((m) => `<option ${m === S.user ? 'selected' : ''}>${esc(m)}</option>`).join('');
   sel.onchange = () => { S.user = sel.value; ls.set('studio.user', S.user); route(); };
 }
 
@@ -295,7 +374,8 @@ function settingsModal(firstRun = false) {
   const tok = ls.get('studio.token', '');
   openModal(`
     <h2 style="margin-bottom:8px">${firstRun ? 'Hoş geldin! 👋' : 'Ayarlar'}</h2>
-    <p class="muted small" style="margin-top:0">Site, özel repodaki verilere senin GitHub token'ınla erişir. Token sadece bu tarayıcıda saklanır.</p>
+    <p class="muted small" style="margin-top:0">Site, özel repodaki verilere senin GitHub token'ınla erişir. Token sadece bu tarayıcıda saklanır.
+      ${S.login ? `<br>Bağlı hesap: <b>${esc(S.login)}</b>${lockedName() ? ` → ${esc(lockedName())}` : ''}${isAdmin() ? ' · 👑 yönetici' : ''}` : ''}</p>
     <div class="stack">
       <div class="field">
         <label for="tokIn">GitHub token</label>
@@ -363,8 +443,24 @@ async function loadGames() {
 }
 
 function statusPill(g) {
-  if (g.status === 'done' && g.published?.url) return '<span class="pill dot st-published">Yayında</span>';
-  const s = STATUS[g.status] || { label: g.status }; return `<span class="pill dot st-${esc(g.status)}">${esc(s.label)}</span>`;
+  if (g.deleteRequested) return '<span class="pill dot st-deleting">Siliniyor</span>';
+  const st = stOf(g);
+  if (st === 'done' && g.published?.url) return '<span class="pill dot st-published">Yayında</span>';
+  const s = STATUS[st] || { label: st }; return `<span class="pill dot st-${esc(st)}">${esc(s.label)}</span>`;
+}
+function cardSub(g) {
+  const st = stOf(g);
+  if (st === 'script') { const s = stats(g); return `${s.chosen}/${s.total} bölüm seçildi`; }
+  if (st === 'materials') { const m = missingSecs(g).length; return m ? `${m} bölümde görüntü eksik` : 'Materyaller hazır'; }
+  if (st === 'review') return `v${latestVersion(g)?.v ?? '?'} inceleniyor`;
+  return STEPS[STATUS[st]?.step ?? 0].name;
+}
+
+function stageGuideHtml() {
+  return `<details class="card stage-guide" ${ls.get('studio.guideSeen') ? '' : 'open'}><summary><b>🧭 Çalışma düzeni</b> <span class="small muted">· 8 aşama, kim ne yapar</span></summary>
+    <ol>${STEPS.map((s) => `<li><b>${s.who === 'w' ? '🤖' : '👥'} ${esc(s.name)}</b>: ${esc(s.tip)}</li>`).join('')}</ol>
+    <p class="small muted" style="margin:0">🤖 = ${WORKER_NAME} çalışır, siz beklersiniz · 👥 = ekip seçer / kontrol eder. Videonun başı hep “<i>[Oyun] in 60 seconds.</i>”, sonu hep “<i>${esc(CLOSING)}</i>”. Oyunu yalnız ${ADMIN.name} silebilir.</p>
+  </details>`;
 }
 
 async function renderHome() {
@@ -386,38 +482,39 @@ async function renderHome() {
     <div class="home-main">
     <div class="hero">
       <h1>60 saniyede oyunlar</h1>
-      <p class="muted" style="margin:0">Yeni bir oyun yaz. ${WORKER_NAME} araştırır, senaryoyu bölüm bölüm 3 seçenekle hazırlar.</p>
+      <p class="muted" style="margin:0">Yeni bir oyun yaz. ${WORKER_NAME} oyunu ve topluluğun esprilerini araştırır, her bölüm için seçenekli metin hazırlar.</p>
       ${channelButton()}
     </div>
     ${workerBanner()}
     ${S.store.demo ? '<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">⚠️ <b>Demo modu</b>: yerel dosyalar okunuyor, değişiklikler kaydedilmez. Kaydetmek için ⚙ ile token gir.</div>' : ''}
-    <form class="new-game card" id="newGame" style="margin-bottom:24px">
+    <form class="new-game card" id="newGame" style="margin-bottom:16px">
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
       <button class="btn btn-primary" type="submit">+ Yeni oyun</button>
     </form>
+    ${stageGuideHtml()}
     <section class="card tasks" id="taskList"><div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
     <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span><span class="spacer"></span>
       ${archivedCount ? `<button class="btn btn-ghost small" id="toggleArchive">${S.showArchived ? 'Arşivi gizle' : `Arşiv (${archivedCount})`}</button>` : ''}</div>
     ${games.length ? `<div class="game-grid">${games.map((g) => {
-      const st = STATUS[g.status]?.step ?? 0;
-      const s = stats(g);
-      return `<div class="card game-card ${g.archived ? 'archived' : ''}" data-open="${esc(g.slug)}" role="link" tabindex="0">
+      const st = STATUS[stOf(g)]?.step ?? 0;
+      return `<div class="card game-card ${g.archived ? 'archived' : ''} ${g.deleteRequested ? 'deleting' : ''}" data-open="${esc(g.slug)}" role="link" tabindex="0">
         <div class="row">${statusPill(g)}<span class="spacer"></span>
           ${ytLink(g)}${driveLink(g, 'icon-btn sm')}
           <button class="icon-btn sm" data-edit="${esc(g.slug)}" title="Projeyi düzenle" aria-label="Projeyi düzenle">⋯</button></div>
         <h3 lang="en">${esc(g.title)}</h3>
-        <div class="progress"><span style="width:${Math.round((st / 5) * 100)}%"></span></div>
-        <div class="row small muted"><span>${g.status === 'choosing' ? `${s.chosen}/${s.total} bölüm seçildi` : esc(STEPS[st])}</span><span class="spacer"></span>${ownersHtml(g)}</div>
+        <div class="progress"><span style="width:${Math.round((st / (STEPS.length - 1)) * 100)}%"></span></div>
+        <div class="row small muted"><span>${esc(cardSub(g))}</span><span class="spacer"></span>${ownersHtml(g)}</div>
       </div>`;
     }).join('')}</div>` : '<div class="card empty muted">Henüz oyun yok.</div>'}
     </div></div>
   `;
-  document.querySelectorAll('[data-open]').forEach((c) => {
+  $$('[data-open]').forEach((c) => {
     c.onclick = (e) => { if (!e.target.closest('a,button')) location.hash = `#/game/${c.dataset.open}`; };
     c.onkeydown = (e) => { if (e.key === 'Enter') location.hash = `#/game/${c.dataset.open}`; };
   });
-  document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
+  $$('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
   const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
+  const gd = $('.stage-guide'); if (gd) gd.ontoggle = () => { if (!gd.open) ls.set('studio.guideSeen', '1'); };
   renderTaskList();
   renderActivity();
 
@@ -426,12 +523,16 @@ async function renderHome() {
     const title = $('#newGameName').value.trim();
     const slug = slugify(title);
     if (!slug) return;
-    if (S.games.has(slug)) { location.hash = `#/game/${slug}`; return; }
+    if (S.games.has(slug)) {
+      if (S.games.get(slug).deleteRequested) return toast('Bu adda bir oyun siliniyor; birkaç dakika sonra tekrar dene.', true);
+      location.hash = `#/game/${slug}`; return;
+    }
     const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Oluşturuluyor…';
     try {
       const g = {
-        schema: 1, slug, title, owner: S.user, owners: [S.user], createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
-        settings: { captions: 'full', mediaFolderUrl: '' }, summary: '', sections: [], materials: [], versions: [], revisions: [],
+        schema: 2, slug, title, owner: S.user, owners: [S.user], createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
+        opening: `${title} in 60 seconds.`, closing: CLOSING,
+        settings: { captions: 'full', mediaFolderUrl: '' }, summary: '', sections: [], versions: [], revisions: [],
         log: [{ at: nowIso(), by: S.user, msg: 'Oyun eklendi, araştırma kuyruğa alındı.' }],
       };
       await S.store.put(`games/${slug}/game.json`, JSON.stringify(g, null, 2) + '\n', `[${S.user}] Yeni oyun: ${title}`);
@@ -454,8 +555,7 @@ function ownersHtml(g, strong = false) {
 }
 const DRIVE_SVG = '<svg viewBox="0 0 87.3 78" width="16" height="16" aria-hidden="true"><path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/><path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/><path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/><path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/><path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/><path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/></svg>';
 const YT_SVG = '<svg viewBox="0 0 28 20" width="20" height="14" aria-hidden="true"><rect width="28" height="20" rx="5" fill="#FF0000"/><path d="M11.2 5.6v8.8L18.8 10z" fill="#fff"/></svg>';
-// Yayınlanan videonun linki (Kağan 2026-10-09): son aşamada elle girilir — iki "GTA 5" projesi olduğundan başlıkla otomatik
-// eşleme yanlış videoyu bağlayabilir; yükleme ileride API ile otomatikleşirse link de otomatik yazılır.
+// Yayınlanan videonun linki (Kağan 2026-10-09): son aşamada elle girilir.
 function ytId(u) { const m = String(u || '').match(/(?:youtube\.com\/(?:shorts\/|watch\?(?:.*&)?v=|embed\/|live\/)|youtu\.be\/)([\w-]{11})/); return m ? m[1] : null; }
 function ytLink(g, cls = 'icon-btn sm') {
   const url = g?.published?.url;
@@ -496,11 +596,15 @@ function editGameModal(slug) {
       <div class="field"><label for="egDrive">Drive klasör linki</label><input type="url" id="egDrive" value="${esc(g.settings?.mediaFolderUrl || '')}" placeholder="https://drive.google.com/drive/folders/…"></div>
       <label class="chip"><input type="checkbox" id="egArchived" ${g.archived ? 'checked' : ''}> Arşivle (ana sayfada gizlenir)</label>
       <div class="row"><button class="btn btn-primary" id="egSave">Kaydet</button><button class="btn btn-ghost" id="egCancel">Vazgeç</button></div>
+      ${isAdmin() ? `<div class="danger-zone"><div class="row"><b>🗑 Oyunu sil</b><span class="small muted">· sadece ${ADMIN.name} görür</span></div>
+        <p class="small muted" style="margin:6px 0 10px">Oyun siteden ve repodan kalkar (git geçmişinde durur). Drive klasörü Google Drive çöp kutusuna gider, 30 gün içinde geri alınabilir.</p>
+        <button class="btn btn-danger small" id="egDelete" ${g.deleteRequested ? 'disabled' : ''}>${g.deleteRequested ? 'Silme sırada' : 'Oyunu sil…'}</button></div>` : ''}
     </div>`);
   $('#egCancel').onclick = closeModal;
+  const del = $('#egDelete'); if (del) del.onclick = () => deleteGameModal(slug);
   $('#egSave').onclick = async () => {
     const title = $('#egTitle').value.trim() || g.title;
-    const os = [...document.querySelectorAll('#modalBody .chip input[type=checkbox][value]')].filter((c) => c.checked).map((c) => c.value);
+    const os = $$('#modalBody .chip input[type=checkbox][value]').filter((c) => c.checked).map((c) => c.value);
     if (!os.length) return toast('En az bir çalışan seçin', true);
     const drive = $('#egDrive').value.trim(), archived = $('#egArchived').checked;
     $('#egSave').disabled = true;
@@ -514,141 +618,62 @@ function editGameModal(slug) {
     } catch (e) { toast('Kaydedilemedi: ' + e.message, true); $('#egSave').disabled = false; }
   };
 }
+// Silme: yalnız yönetici. İş kuyruğa Kağan'ın token'ıyla yazılır; worker (admin_jobs.py) commit yazarını doğrular.
+function deleteGameModal(slug) {
+  if (!isAdmin()) return toast(`Oyunları yalnız ${ADMIN.name} silebilir.`, true);
+  const g = S.games.get(slug);
+  openModal(`<h2>🗑 ${esc(g.title)} silinsin mi?</h2>
+    <p class="small">Oyun siteden ve repodan kaldırılır (git geçmişinde kalır), bekleyen işleri iptal edilir. Drive klasörü Google Drive çöp kutusuna gider, 30 gün içinde geri alınabilir. ${WORKER_NAME} birkaç dakika içinde siler.</p>
+    <div class="field"><label for="delConfirm">Onaylamak için oyunun adını yaz: <b lang="en">${esc(g.title)}</b></label><input id="delConfirm" type="text" autocomplete="off"></div>
+    <div class="row" style="margin-top:12px"><button class="btn btn-danger" id="delGo" disabled>Sil</button><button class="btn btn-ghost" id="delCancel">Vazgeç</button></div>`);
+  const inp = $('#delConfirm'), go = $('#delGo');
+  inp.oninput = () => { go.disabled = inp.value.trim() !== g.title; };
+  inp.focus();
+  $('#delCancel').onclick = closeModal;
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      await flush(slug);
+      const job = await enqueue('delete_game', slug, { login: S.login });
+      await mutateGame(slug, (x) => { x.deleteRequested = { by: S.user, at: nowIso(), job }; logLine(x, `${ADMIN.name} oyunun silinmesini istedi.`); }, 'silme istendi');
+      closeModal(); toast('Silme kuyruğa alındı ✓'); location.hash = '#/';
+    } catch (e) { toast('Olmadı: ' + e.message, true); go.disabled = false; }
+  };
+}
 
 function pipelineHtml(g) {
-  const cur = STATUS[g.status]?.step ?? 0;
-  const back = g.status === 'collecting';
-  return `<div class="pipeline">${STEPS.map((s, i) => `<div class="step ${i < cur ? 'done' : ''} ${i === cur ? 'current' : ''} ${back && s === 'Seçim' ? 'go-back' : ''}" ${back && s === 'Seçim' ? 'title="Seçim aşamasına geri dön" role="button" tabindex="0"' : ''}><div class="bar"></div>${s}</div>`).join('')}</div>`;
+  const cur = STATUS[stOf(g)]?.step ?? 0;
+  return `<div class="pipeline">${STEPS.map((s, i) => `<div class="step ${i < cur ? 'done' : ''} ${i === cur ? 'current' : ''}" title="${esc(s.tip)}">
+    <div class="bar"></div><span class="who">${s.who === 'w' ? '🤖' : '👥'}</span><span class="step-name">${esc(s.name)}</span></div>`).join('')}</div>`;
 }
 
-const REF_ICON = { youtube: '▶', gif: 'GIF', sfx: '🔊', stock: '🎞', search: '🔎', local: '📁' };
-function refsHtml(refs) {
-  if (!refs?.length) return '';
-  return `<div class="refs">${refs.map((r) => `<a class="ref" href="${esc(r.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
-    ${r.thumb ? `<img src="${esc(r.thumb)}" alt="" loading="lazy">` : `<span class="ref-icon">${REF_ICON[r.kind] || '🔗'}</span>`}
-    <span class="ref-label">${esc(r.label)}</span></a>`).join('')}</div>`;
+/* ---------- 2) Metin: her bölüm için bir replik (meme / ses / süre yok) ---------- */
+// Sabit açılış ve kapanış metnin içinde soluk vurguyla gösterilir (her videoda aynı)
+function narrHtml(text, g) {
+  let t = String(text || '').trim(), pre = '', post = '';
+  const op = g.opening || `${g.title} in 60 seconds.`, cl = g.closing || CLOSING;
+  if (op && t.startsWith(op)) { pre = op; t = t.slice(op.length).trim(); }
+  if (cl && t.endsWith(cl)) { post = cl; t = t.slice(0, -cl.length).trim(); }
+  return `${pre ? `<span class="fixed-line" title="Sabit açılış: her videoda aynı">${esc(pre)}</span> ` : ''}${esc(t)}${post ? ` <span class="fixed-line" title="Sabit kapanış: her videoda aynı">${esc(post)}</span>` : ''}`;
 }
-
-// Claude'un indirdiği meme/sfx adayları: önizleme + "Seç" butonu
-function candidatesHtml(slug, sec, o, n) {
-  return `<div class="cands">${n.candidates.map((c) => {
-    const pv = (f) => `${c.pvBase || `games/${slug}/previews/`}${f}`;
-    const on = n.chosen === c.id;
-    const isSfx = !!c.audio;
-    return `<div class="cand ${on ? 'chosen' : ''}" data-cand="${esc(c.id)}">
-      <button type="button" class="cand-media ${isSfx ? 'sfx' : ''}" data-play="${esc(pv(isSfx ? c.audio : c.video))}" data-kind="${isSfx ? 'sfx' : 'meme'}" title="Önizle">
-        ${isSfx ? '<span class="sfx-icon">🔊</span>' : `<img data-src="${esc(pv(c.thumb))}" alt="">`}
-        ${c.style ? `<span class="style-badge ${c.style}">${c.style === 'green' ? 'Green screen' : 'Tam video'}${c.vertical ? ' · dikey' : ''}</span>` : ''}
-        <span class="play-badge">▶</span>
-      </button>
-      <div class="cand-title">${esc(c.title)}${c.duration ? ` <span class="muted">· ${Math.round(c.duration)} sn</span>` : ''}${c.tr ? `<div class="small muted">${esc(c.tr)}</div>` : ''}</div>
-      <div class="cand-actions">
-        <button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}|${esc(c.id)}">${on ? '✓ Seçildi' : 'Seç'}</button>
-        <a class="small muted" href="${esc(c.page)}" target="_blank" rel="noopener">kaynak ↗</a>
-      </div>
-    </div>`;
-  }).join('')}${isOptional(n) ? noneCandHtml(sec, o, n) : ''}${customCandHtml(sec, o, n)}</div>`;
+function sourcesHtml(o) {
+  const list = [...(o.sources || []), ...(o.source ? [o.source] : [])].filter((x) => x?.url);
+  return list.length ? `<div class="opt-srcs">${list.map((x) => `<a class="opt-src small" href="${esc(x.url)}" target="_blank" rel="noopener" title="Esprinin kaynağı">💬 ${esc(x.label || shortUrl(x.url))} ↗</a>`).join('')}</div>` : '';
 }
-// Bindirme de ara klip de isteğe bağlı: sadece biri, ikisi ya da hiçbiri seçilebilir
-const isOptional = (n) => !!(n.optional || n.role === 'overlay' || n.role === 'cutaway');
-function noneCandHtml(sec, o, n) {
-  const on = n.chosen === 'none';
-  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  return `<div class="cand none ${on ? 'chosen' : ''}" data-cand="none">
-    <div class="cand-media custom-media"><span>🚫</span><b>Kullanma</b><small>${n.role === 'overlay' ? 'bindirme yok' : 'ara klip yok'}</small></div>
-    <div class="cand-actions"><button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${key}|none">${on ? '✓ Seçildi' : 'Seç'}</button></div>
-  </div>`;
-}
-function customCandHtml(sec, o, n) {
-  const on = n.chosen === 'custom';
-  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  return `<div class="cand custom ${on ? 'chosen' : ''}" data-cand="custom">
-    <div class="cand-media custom-media"><span>✍️</span><b>Başka klip</b><small>kendi linkimi vereceğim</small></div>
-    <div class="custom-form" ${on ? '' : 'hidden'}>
-      <input type="url" class="custom-url" data-custom="${key}" placeholder="YouTube / TikTok / Tenor / myinstants linki" value="${esc(n.custom?.url || '')}">
-      <input type="text" class="custom-note" data-custom-note="${key}" placeholder="Not (ör. 0:12–0:15 arası)" value="${esc(n.custom?.note || '')}">
-    </div>
-    <div class="cand-actions"><button type="button" class="btn cand-pick ${on ? 'btn-primary' : ''}" data-pick="${key}|custom">${on ? '✓ Seçildi' : 'Seç'}</button></div>
-  </div>`;
-}
-
-function needHtml(slug, sec, o, n) {
-  const key = `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-  const showDesc = !(n.role === 'cutaway' && !n.added);  // ara klipte başlık zaten "Ara klip"; etiket ayrıca gösteriliyor
-  const head = `<div class="need-head">${showDesc ? `<span class="need-desc">${n.role ? esc(n.desc) : `${esc(TYPE_LABEL[n.type] || n.type)}: ${esc(n.desc)}`}</span>` : ''}${n.type === 'meme' ? ` <button type="button" class="at-chip" data-at="${key}" title="Bu meme anlatıcı hangi kelimeyi söylerken ekrana girsin? Tıkla, değiştir. Boş bırakırsan ${WORKER_NAME} seçer.">⏱ giriş anı: ${n.at ? `“${esc(n.at.replace(/"/g, ''))}”` : 'otomatik · belirle'}</button>` : ''}${n.candidates?.length && !n.chosen ? ` <span class="small" style="color:var(--warn)">· birini seç</span>` : ''}
-    ${n.added ? `<button type="button" class="link-btn small need-del" data-del="${key}">kaldır</button>` : ''}
-    ${n.type === 'meme' ? `<button type="button" class="link-btn small need-fb ${n.feedback && !n.feedbackDone ? 'on' : ''}" data-fb="${key}" title="Alakasız: bu meme repliğe uymuyor mu? Sebebini yaz, ${WORKER_NAME} değiştirsin ve ders çıkarsın.">${n.feedback && !n.feedbackDone ? '👎 bildirildi · geri al' : '👎'}</button>` : ''}</div>
-    ${n.why ? `<div class="need-why">💡 ${esc(n.why)}</div>` : ''}
-    ${n.review ? `<div class="need-warn">⚠️ ${esc(n.review)}</div>` : ''}
-    ${n.feedback && !n.feedbackDone ? `<div class="need-note">👎 ${esc(n.feedback.by)}: “${esc(n.feedback.reason || 'alakasız')}” · alttan <b>Tekrar yap</b>'a basınca işlenir</div>` : ''}`;
-  const label = n.role === 'cutaway' && n.label ? `<div class="cut-label"><span>${esc(n.label)}</span></div>` : '';
-  if (n.designed) return head + `<div class="designed" title="${WORKER_NAME} çizer, seçim gerekmez.">🎨 Hazır tasarım</div>`;
-  return head + label + (n.candidates?.length ? candidatesHtml(slug, sec, o, n) : refsHtml(n.refs));
-}
-
-// Örnek videolara göre (SAMPLE_BREAKDOWN): oyun üstü bindirme (≤1) + opsiyonel ara klip (≤1) + ses efekti
-const ROLE_HEAD = {
-  overlay: ['🟩 Oyun ekranına bindirme', 'Oyun görüntüsü durmadan üstüne konur.'],
-  cutaway: ['🎬 Ara klip', ' Oyun 2–3 sn durur, etiketli tam ekran klip girer. Videoda toplam 3–4 tane yeterli.'],
-  sfx: ['🔊 Ses efekti', ''],
-  meme: ['🎬 Meme', ''],
-};
-// "Ekranda" satırı sabit metin değil, ekibin o anki seçimlerinden üretilir (2026-10-07: sabit metin seçilmemiş FBI klibini anlatıyordu)
-function flowHtml(sec, o) {
-  const pick = (n) => {
-    if (!n || n.chosen === 'none' || !n.chosen) return null;
-    if (n.chosen === 'custom') return n.custom?.url ? 'kendi verdiğiniz klip' : null;
-    return (n.candidates || []).find((c) => c.id === n.chosen)?.title || null;
-  };
-  const at = (n) => (n?.at ? ` <span class="muted">(“${esc(n.at.replace(/"/g, ''))}”)</span>` : '');
-  const ov = (o.needs || []).find((n) => n.role === 'overlay');
-  const cu = (o.needs || []).find((n) => n.role === 'cutaway');
-  const parts = ['🎮 Oyun görüntüsü + altyazı'];
-  if (pick(ov)) parts.push(`🟩 üstüne <b>${esc(pick(ov))}</b>${at(ov)}`);
-  if (pick(cu)) parts.push(`🎬 ara klip: <b>${esc(pick(cu))}</b>${at(cu)}`);
-  return parts.join(' → ');
-}
-function roleBlocksHtml(slug, sec, o) {
-  // Ses efektleri ekibe sorulmaz (2026-10-07): klip/green screen kendi sesini taşır, gerekirse worker kurguda ekler
-  const needs = (o.needs || []).filter((n) => n.type !== 'gameplay' && n.type !== 'sfx');
-  if (!needs.length) return '<span class="muted small">Bu seçenekte meme yok, sadece oyun görüntüsü + altyazı.</span>';
-  const roleOf = (n) => n.role || (n.type === 'sfx' ? 'sfx' : 'meme');
-  return ['overlay', 'cutaway', 'meme'].map((r) => {
-    const list = needs.filter((n) => roleOf(n) === r);
-    if (!list.length) return '';
-    const [h, hint] = ROLE_HEAD[r];
-    const key = (n) => `${esc(sec.id)}|${esc(o.id)}|${esc(n.file)}`;
-    const extra = r === 'overlay' ? list.map((n) => `<button type="button" class="link-btn small green-add" data-green-add="${key(n)}">+ Green screen kataloğundan seç</button>`).join('')
-      : r === 'cutaway' ? list.map((n) => `<button type="button" class="link-btn small canon-into" data-canon-into="${key(n)}">+ Meme Kanonu'ndan seç</button>`).join('') : '';
-    return `<div class="role role-${r}"><div class="role-head"${hint ? ` title="${esc(hint)}"` : ''}>${h}</div>${list.map((n) => needHtml(slug, sec, o, n)).join('')}${extra}</div>`;
-  }).join('');
-}
-function optionHtml(sec, o, slug) {
+function optionHtml(sec, o, g) {
   const on = sec.selected === o.id;
   return `<div class="opt ${on ? 'selected' : ''}" data-sec="${esc(sec.id)}" data-opt="${esc(o.id)}" role="button" tabindex="0">
     <span class="radio"></span>
-    <div class="opt-en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${esc(o.narration)}”</div>
-    <div class="opt-tr">🇹🇷 ${esc(o.tr)}</div>
-    <button type="button" class="link-btn small peek-btn">▸ ayrıntıları göster</button>
-    <div class="opt-meta">
-      <dl class="opt-desc">
-        <dt>Ekranda</dt><dd class="flow" data-flow="${esc(sec.id)}|${esc(o.id)}">${flowHtml(sec, o)}</dd>
-        ${(o.needs || []).some((n) => n.type === 'gameplay') ? `<dt>Ek görüntü</dt><dd>${o.needs.filter((n) => n.type === 'gameplay').map((n) => `<div>${esc(n.desc)} <code>${esc(n.file)}</code></div>`).join('')}</dd>` : ''}
-      </dl>
-      ${roleBlocksHtml(slug, sec, o)}
-      ${(o.needs || []).some((n) => n.role === 'cutaway') ? '' : `<button type="button" class="link-btn small canon-add" data-canon-add="${esc(sec.id)}|${esc(o.id)}">+ Ara klip ekle (Meme Kanonu)</button>`}
-    </div>
+    <div class="opt-en" lang="en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${narrHtml(o.narration, g)}”</div>
+    <div class="opt-tr"><span class="tr-badge">TR</span>${esc(o.tr)}</div>
+    ${sourcesHtml(o)}
   </div>`;
 }
-
-function sectionHtml(sec, i, editable, opening, slug, g) {
-  const collecting = g?.status === 'collecting';
-  return `<section class="card ${sec.selected ? 'has-sel' : ''} ${collecting ? 'collecting' : ''}" id="sec-${esc(sec.id)}">
-    <div class="section-head"><span class="section-time">${esc(sec.time)}</span><h2>${esc(sec.title)}</h2><span class="section-num">S${i + 1}</span></div>
-    <div class="muted small" style="margin-top:4px">${esc(sec.goal || '')}</div>
-    ${collecting ? secMaterialsHtml(g, i) + `<button type="button" class="btn small reopen-btn">✏️ Seçimi değiştir</button>` : ''}
-    <div class="need-box"><b>🎮 Gereken oyun görüntüsü</b><ul>${(sec.gameplay || []).map((x) => `<li>${esc(x.desc)} <code>${esc(x.file)}</code></li>`).join('')}</ul></div>
-    <div class="options">${sec.options.map((o) => optionHtml(sec, o, slug)).join('')}</div>
+function scriptSectionHtml(sec, i, g, editable) {
+  return `<section class="card ${sec.selected ? 'has-sel' : ''}" id="sec-${esc(sec.id)}">
+    <div class="section-head"><span class="section-num">S${i + 1}</span><h2>${esc(sec.title)}</h2></div>
+    ${sec.goal ? `<div class="muted small" style="margin-top:4px">${esc(sec.goal)}</div>` : ''}
+    <div class="options" style="margin-top:12px">${(sec.options || []).map((o) => optionHtml(sec, o, g)).join('')}</div>
     <details class="sec-tools" ${sec.note || sec.regen ? 'open' : ''}><summary class="small muted">✏️ Not ekle / bu bölümü yeniden öner</summary>
     <textarea class="note-input" data-note="${esc(sec.id)}" placeholder="${sec.regen ? 'Yeni tema / istek: ör. “Pauselock esprisi olsun, oyunu durdurup kaçan oyunculara gönderme”' : 'Bu bölüm için not / kendi fikrin (opsiyonel)'}" ${editable ? '' : 'disabled'}>${esc(sec.note || '')}</textarea>
     <div class="row" style="margin-top:8px">
@@ -657,65 +682,390 @@ function sectionHtml(sec, i, editable, opening, slug, g) {
     </div></details>
   </section>`;
 }
+function fixedLinesHtml(g) {
+  return `<section class="card fixed-card"><div class="row" style="align-items:flex-start;flex-wrap:nowrap"><span class="lock">🔒</span><div>
+    <b>Sabit açılış ve kapanış</b> <span class="small muted">· her videoda aynı</span>
+    <div class="small" style="margin-top:4px">Başta: <span class="fixed-line" lang="en">“${esc(g.opening || `${g.title} in 60 seconds.`)}”</span> · Sonda: <span class="fixed-line" lang="en">“${esc(g.closing || CLOSING)}”</span></div>
+    <p class="small muted" style="margin:6px 0 0">${WORKER_NAME} her bölüm için oyunun topluluğundan (Reddit, Steam, YouTube yorumları…) bulduğu esprilerle seçenek yazdı. Burada sadece metni seçiyorsunuz; görüntü, meme, ses efekti ve süreler sonraki aşamalarda.</p>
+  </div></div></section>`;
+}
+function scriptSummaryHtml(g, open = false, title = '📝 Metin') {
+  if (!g.sections?.length) return '';
+  return `<details class="card" ${open ? 'open' : ''}><summary><b>${title}</b> <span class="small muted">· seçilen replikler</span></summary>
+    <ol class="script-list">${g.sections.map((s, i) => { const o = selectedOpt(s); return `<li><span class="section-num">S${i + 1} · ${esc(s.title)}</span>
+      ${o ? `<div class="opt-en" lang="en">“${narrHtml(o.narration, g)}”</div><div class="opt-tr">${esc(o.tr)}</div>` : '<div class="muted small">seçim yok</div>'}</li>`; }).join('')}</ol></details>`;
+}
+const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length);
 
-// Materyal aşaması: üstte sadece ilerleme + Drive; her bölümün materyali kendi kartında (secMaterialsHtml)
-function materialsSummaryHtml(g) {
-  const mats = (g.materials || []).filter((m) => !m.auto);
-  const done = mats.filter((m) => m.done).length;
-  return `<section class="card" id="materials">
-    <div class="row"><h2>📦 Materyaller</h2><span class="pill">${done}/${mats.length} toplandı</span><span class="spacer"></span>
-      <button class="btn btn-ghost back-to-choose">← Seçime geri dön</button>
-      <button class="btn btn-ghost" id="showExport">Tüm listeyi göster / indir</button></div>
-    <div class="small muted" style="margin-top:10px">Her bölümün toplanacak görüntüleri aşağıda kendi kartında. Topladıkça kutuyu işaretleyin.
-      ${g.settings.mediaFolderUrl ? `Dosyaları listedeki adlarla bu klasöre yükleyin: ${driveLink(g)}` : 'Drive klasörü henüz bağlı değil.'}
-      Tek bir bölümü değiştirmek için o bölümdeki <b>✏️ Seçimi değiştir</b>, hepsine dönmek için <b>← Seçime geri dön</b>.</div>
-  </section>`;
+/* ---------- 4) Kontrol: Çırak'ın bulduğu materyaller + yükleme / link / katalog ---------- */
+const pvPath = (g, pv, f) => `${pv.base || `games/${g.slug}/previews/`}${f}`;
+function srcLabelHtml(src) {
+  if (!src) return '';
+  const a = (u, t) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)} ↗</a>`;
+  switch (src.kind) {
+    case 'youtube': return `▶ YouTube: ${a(src.url, src.title || shortUrl(src.url))}`;
+    case 'link': return `🔗 ${a(src.url, src.title || shortUrl(src.url))}`;
+    case 'upload': return `📤 ${esc(src.by || '')} yükledi: <b>${esc(src.name || '')}</b>${src.size ? ` · ${fmtSize(src.size)}` : ''}${src.file ? ' · ✓ Drive\'da' : ` · ${WORKER_NAME} kurguda alacak`}`;
+    case 'canon': return `🏆 Meme Kanonu${src.page ? ` · ${a(src.page, 'kaynak')}` : ''}`;
+    case 'greens': return `🟩 Green Screen Kataloğu${src.page ? ` · ${a(src.page, 'kaynak')}` : ''}`;
+    case 'sfxlib': return `🔊 Ses Efekti Kataloğu${src.page ? ` · ${a(src.page, 'kaynak')}` : ''}`;
+    default: return src.page || src.url ? `📚 ${a(src.page || src.url, src.title || 'kaynak')}` : '📚 Kütüphane';
+  }
 }
-function secMaterialsHtml(g, i) {
-  const mats = (g.materials || []).filter((m) => m.section === `S${i + 1}` && !m.auto);
-  if (!mats.length) return '';
-  return `<div class="sec-mats"><div class="sec-mats-head">📦 Bu bölüm için toplanacaklar</div>${mats.map((m) => `
-      <label class="mat ${m.done ? 'done' : ''}">
-        <input type="checkbox" data-mat="${esc(m.file || m.id)}" ${m.done ? 'checked' : ''}>
-        <div style="flex:1;min-width:0">
-          <div class="mat-desc">${esc(m.desc)}</div>
-          <div class="small muted"><code>${esc(m.file)}</code>${m.doneBy ? ` · ✓ ${esc(m.doneBy)}` : ''}</div>
-        </div>
-      </label>`).join('')}</div>`;
+function entryMediaHtml(g, x, kind) {
+  const src = x.src || {};
+  const loc = src.uid && S.localMedia.get(src.uid);
+  if (loc) return kind === 'sfx' ? `<audio class="slot-audio" src="${loc}" controls preload="metadata"></audio>`
+    : `<video class="slot-video" src="${loc}" controls muted playsinline preload="metadata"></video>`;
+  const pv = x.preview;
+  if (pv?.audio) return `<button type="button" class="cand-media sfx" data-play="${esc(pvPath(g, pv, pv.audio))}" data-kind="sfx" title="Dinle"><span class="sfx-icon">🔊</span><span class="play-badge">▶</span></button>`;
+  if (pv?.video || pv?.thumb) return `<button type="button" class="cand-media" data-play="${esc(pvPath(g, pv, pv.video || pv.thumb))}" data-kind="meme" title="Önizle">${pv.thumb ? `<img data-src="${esc(pvPath(g, pv, pv.thumb))}" alt="">` : ''}<span class="play-badge">▶</span></button>`;
+  const why = src.kind === 'upload' ? 'önizleme kurgudan sonra' : src.kind === 'link' ? 'link · önizleme kurgudan sonra' : 'önizleme yok';
+  return `<div class="cand-media empty-media"><span>${KIND[kind].icon}</span><small>${why}</small></div>`;
 }
-function materialsHtml(g) {
-  const mats = g.materials || [];
-  const done = mats.filter((m) => m.done).length;
-  const order = ['gameplay', 'meme', 'sfx'];
-  return `<section class="card" id="materials">
-    <div class="row"><h2>📦 Materyaller</h2><span class="pill">${done}/${mats.length}</span><span class="spacer"></span>
-      <button class="btn btn-ghost" id="showExport">Listeyi göster / indir</button></div>
-    <div class="row small muted" style="margin:12px 0">
-      ${g.settings.mediaFolderUrl ? `<span>Oyun görüntülerini bu klasöre, listedeki dosya adlarıyla yükleyin:</span>${driveLink(g)}` : '<span>Drive klasörü henüz bağlı değil, ⋯ Düzenle\'den ekleyin.</span>'}
+function uploadBoxHtml(key) {
+  const u = S.uploading.get(key);
+  if (!u) return '';
+  return `<div class="upbox"><div class="small">📤 <b>${esc(u.name)}</b> · ${fmtSize(u.size)} · <span data-uppct="${esc(key)}">%${Math.round(u.pct * 100)}</span> yükleniyor…</div>
+    <div class="upbar-track"><div class="upbar" data-upbar="${esc(key)}" style="width:${Math.round(u.pct * 100)}%"></div></div></div>`;
+}
+const ACCEPT = { gp: 'video/*', cutaway: 'video/*,image/gif', green: 'video/*', sfx: 'audio/*' };
+function dropzoneHtml(key, kind, text) {
+  return `<label class="dropzone" data-drop="${esc(key)}" data-kind="${kind}"><input type="file" accept="${ACCEPT[kind]}">
+    <span class="dz-icon">📤</span><b>${esc(text || 'Dosyayı sürükle bırak ya da tıkla seç')}</b><span class="small muted">en fazla 75 MB · ${kind === 'sfx' ? 'mp3 / wav' : 'mp4 / mov / webm'}</span></label>`;
+}
+function linkRowHtml(key, ph) {
+  return `<div class="link-row"><input type="url" data-link="${esc(key)}" placeholder="${esc(ph || 'veya link yapıştır (YouTube, TikTok, X, Reddit…)')}"><button type="button" class="btn small" data-link-save="${esc(key)}">Ekle</button></div>`;
+}
+function gpSlotHtml(g, sec, x, ed) {
+  const key = `${sec.id}|${x.id}`;
+  const up = uploadBoxHtml(key);
+  const rangeIn = ed ? `<label class="range-row">⏱ Hangi saniyeler arası? <input type="text" data-range="${esc(key)}" value="${esc(x.range || '')}" placeholder="ör. 0:12-0:18"></label>`
+    : x.range ? `<div class="small muted">⏱ ${esc(x.range)}</div>` : '';
+  if (!x.src) {
+    return `<div class="slot missing" data-entry="${esc(key)}">
+      <div class="row"><span class="kind-badge k-gp">Görüntü yok</span><span class="slot-desc">${esc(x.desc || 'Oyun görüntüsü')}</span><span class="spacer"></span>
+        ${ed && x.addedBy ? `<button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button>` : ''}</div>
+      ${x.review ? `<div class="need-why">🤖 ${esc(x.review)}</div>` : `<div class="small" style="color:var(--warn);margin-top:4px">${WORKER_NAME} uygun görüntü bulamadı. Kayıt yükle ya da link ver; hangi saniyeleri kullanacağını yaz.</div>`}
+      ${ed ? (up || `<div style="margin-top:8px">${dropzoneHtml(key, 'gp')}</div>${linkRowHtml(key)}`) + rangeIn : ''}
+    </div>`;
+  }
+  return `<div class="slot" data-entry="${esc(key)}">
+    <div class="slot-media">${entryMediaHtml(g, x, 'gp')}</div>
+    <div class="slot-body">
+      <div class="slot-desc">${esc(x.desc || 'Oyun görüntüsü')}</div>
+      <div class="small muted src-line">${srcLabelHtml(x.src)}</div>
+      ${x.review ? `<div class="need-why">🤖 ${esc(x.review)}</div>` : ''}
+      ${x.src.error ? `<div class="need-warn">⚠️ ${esc(x.src.error)}</div>` : ''}
+      ${rangeIn}${up}
+      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button></div>
+        <div class="replace-box" data-replace-box="${esc(key)}" hidden>${dropzoneHtml(key, 'gp', 'Yeni kayıt: sürükle bırak ya da tıkla seç')}${linkRowHtml(key)}</div>` : ''}
     </div>
-    ${order.map((t) => mats.filter((m) => m.type === t)).filter((l) => l.length).map((list) => list.map((m) => m.auto ? `
-      <div class="mat">
-        <span style="width:20px;text-align:center">🤖</span>
-        <div style="flex:1;min-width:0">
-          <div class="row" style="gap:6px"><span class="mat-type t-${esc(m.type)}">${esc(TYPE_LABEL[m.type])}</span><span class="small muted">${esc(m.section)} · Claude hazırladı</span></div>
-          <div class="mat-desc">${esc(m.chosenTitle)}${m.chosenExplicit ? '' : ' <span class="small" style="color:var(--warn)">(seçim yapılmadı, ilk aday kullanılacak)</span>'}</div>
-          <div class="small muted"><code>${esc(m.file)}</code></div>
-        </div>
-      </div>` : `
-      <label class="mat ${m.done ? 'done' : ''}">
-        <input type="checkbox" data-mat="${esc(m.file || m.id)}" ${m.done ? 'checked' : ''}>
-        <div style="flex:1;min-width:0">
-          <div class="row" style="gap:6px"><span class="mat-type t-${esc(m.type)}">${esc(TYPE_LABEL[m.type])}</span><span class="small muted">${esc(m.section)}</span>${m.doneBy ? `<span class="small muted">· ✓ ${esc(m.doneBy)}</span>` : ''}</div>
-          <div class="mat-desc">${esc(m.desc)}</div>
-          <div class="small muted"><code>${esc(m.file)}</code>${m.source ? ` · ${esc(m.source)}` : ''}${m.search ? ` · 🔎 “${esc(m.search)}”` : ''}</div>
-          ${refsHtml(m.refs)}
-        </div>
-      </label>`).join('')).join('')}
-    <div class="mat"><span style="width:20px">🎙️</span><div><span class="mat-type t-voice">Anlatıcı</span><div class="mat-desc">ElevenLabs seslendirmesi: Claude API ile tek seferde otomatik üretir.</div></div></div>
+  </div>`;
+}
+function itemHtml(g, sec, x, ed) {
+  const key = `${sec.id}|${x.id}`, k = KIND[x.kind] || KIND.cutaway;
+  const up = uploadBoxHtml(key);
+  return `<div class="item" data-entry="${esc(key)}">
+    <div class="slot-media">${entryMediaHtml(g, x, x.kind)}</div>
+    <div class="slot-body">
+      <div class="item-head"><span class="kind-badge k-${esc(x.kind)}" title="${esc(k.hint || '')}">${k.icon} ${esc(k.label)}</span> <b>${esc(x.title || '')}</b>${x.tr ? ` <span class="small muted">· ${esc(x.tr)}</span>` : ''}</div>
+      ${x.why ? `<div class="need-why">💡 ${esc(x.why)}</div>` : ''}
+      <div class="row small item-opts">
+        ${ed ? `<button type="button" class="at-chip" data-at="${esc(key)}" title="Anlatıcı hangi kelimeyi söylerken girsin? Boş bırakırsan ${WORKER_NAME} seçer.">⏱ ${x.at ? `“${esc(x.at)}”` : 'giriş anı: otomatik'}</button>`
+          : x.at ? `<span class="at-chip">⏱ “${esc(x.at)}”</span>` : ''}
+        ${x.kind === 'cutaway' ? (ed ? `<label class="label-row">Etiket <input type="text" class="label-in" data-label="${esc(key)}" value="${esc(x.label || '')}" placeholder="ör. ME:" maxlength="40"></label>`
+          : x.label ? `<span class="cut-label"><span>${esc(x.label)}</span></span>` : '') : ''}
+      </div>
+      <div class="small muted src-line">${srcLabelHtml(x.src)}${x.by && x.by !== WORKER_NAME ? ` · ${esc(x.by)} ekledi` : ''}</div>
+      ${x.src?.error ? `<div class="need-warn">⚠️ ${esc(x.src.error)}</div>` : ''}
+      ${up}
+      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button></div>` : ''}
+    </div>
+  </div>`;
+}
+function mediaSectionHtml(g, sec, i, ed, sub = false) {
+  const m = sec.media || { gameplay: [], items: [] };
+  const o = selectedOpt(sec);
+  const miss = !(m.gameplay || []).some((x) => x.src);
+  return `<section class="${sub ? 'media-sub' : 'card'} media-sec" id="sec-${esc(sec.id)}">
+    <div class="section-head"><span class="section-num">S${i + 1}</span><h2>${esc(sec.title)}</h2>${miss ? '<span class="pill warn-pill">görüntü eksik</span>' : ''}</div>
+    ${o ? `<div class="line-quote"><div class="opt-en" lang="en">“${narrHtml(o.narration, g)}”</div><div class="opt-tr small">${esc(o.tr)}</div></div>` : ''}
+    <div class="mblock"><div class="mblock-head">🎮 Oyun görüntüsü</div>
+      ${(m.gameplay || []).map((x) => gpSlotHtml(g, sec, x, ed)).join('') || `<p class="small muted">Henüz görüntü yok.</p>`}
+      ${ed ? `<button type="button" class="link-btn small" data-add-gp="${esc(sec.id)}">+ Başka görüntü ekle</button>` : ''}</div>
+    <div class="mblock"><div class="mblock-head">😂 Memeler ve ses efektleri</div>
+      ${(m.items || []).map((x) => itemHtml(g, sec, x, ed)).join('') || '<p class="small muted">Bu bölümde meme yok: oyun görüntüsü + altyazı.</p>'}
+      ${ed ? `<div class="add-row">${['cutaway', 'green', 'sfx'].map((k) => `<button type="button" class="btn small" data-add-item="${esc(sec.id)}|${k}" title="${esc(KIND[k].hint)}">+ ${KIND[k].icon} ${KIND[k].label}</button>`).join('')}</div>` : ''}</div>
   </section>`;
 }
+function mediaHeadHtml(g) {
+  return `<section class="card" id="mediaHead">
+    <div class="row"><h2>📦 Materyal kontrolü</h2><span class="spacer"></span>${driveLink(g)}<button type="button" class="btn btn-ghost small" id="backToScript">← Metne dön</button></div>
+    <p class="small muted" style="margin:10px 0">${WORKER_NAME} her bölüm için oyun görüntüsü, ara klip, green screen ve ses efekti seçti. Önizlemeye tıkla; beğenmediğini <b>↻ Değiştir</b> ya da <b>Kaldır</b>, kataloglardan / linkten / dosyadan yenisini ekle. Görüntü bulunamayan bölümde yükleme alanı var: kaydı sürükle bırak, sonra hangi saniyeler arası kullanılacağını yaz. ${WORKER_NAME} kurguda hepsine bakıp değerlendirir.</p>
+    <div class="row small" id="mediaCounts">${mediaCountsHtml(g)}</div>
+    <div class="row" style="margin-top:12px"><span class="small" style="font-weight:600">Altyazı</span>
+      <div class="seg" id="capSeg">${CAPTIONS.map((x) => `<button type="button" data-cap="${x.v}" class="${g.settings.captions === x.v ? 'on' : ''}" title="${esc(x.hint)}">${x.label}</button>`).join('')}</div></div>
+  </section>`;
+}
+function mediaCountsHtml(g) {
+  const miss = missingSecs(g).length, c = itemCounts(g), n = g.sections.length;
+  return `<span class="pill">🎮 ${n - miss}/${n} bölümde görüntü var</span>${miss ? `<span class="pill warn-pill">⚠️ ${miss} bölümde eksik</span>` : ''}
+    <span class="pill" title="Hedef 3–4">🎬 ${c.cutaway} ara klip</span><span class="pill">🟩 ${c.green} green screen</span><span class="pill">🔊 ${c.sfx} ses efekti</span>`;
+}
 
-/* ---------- İnceleme: sürümler + oynatıcı + zaman damgalı notlar → "yeniden oluştur" ---------- */
+// Kataloglar: ara klip = Meme Kanonu, green screen = Green Screen Kataloğu, ses = Ses Efekti Kataloğu
+const pickOpts = (c) => Object.fromEntries(['hit', 'clip', 'mute'].filter((k) => c[k] != null).map((k) => [k, c[k]]));
+const CATALOGS = {
+  cutaway: { path: '_studio/memes/canon.json', title: '🏆 Meme Kanonu', ph: 'Ara: polis, kaçış, şaşkınlık, para, ölüm…',
+    norm: (c) => ({ title: c.name, tr: c.tr, use: c.use, hay: [c.name, c.tr, c.use, ...(c.tags || []), ...(c.mood || [])].join(' '),
+      src: { kind: 'canon', id: c.id, lib: c.lib, page: c.page }, preview: { thumb: c.thumb, video: c.video, base: '_studio/memes/previews/' }, opts: pickOpts(c) }) },
+  green: { path: '_studio/memes/greens.json', title: '🟩 Green Screen Kataloğu', ph: 'Ara: patlama, para, gözlük, iskelet, emoji…',
+    norm: (c) => ({ title: c.name, tr: c.tr, use: c.use, hay: [c.name, c.tr, c.use, ...(c.tags || [])].join(' '),
+      src: { kind: 'greens', id: c.id, lib: c.lib, page: c.page }, preview: { thumb: c.thumb, video: c.video, base: c.pvBase || '_studio/memes/previews/' }, opts: pickOpts(c) }) },
+  sfx: { path: '_studio/sfx/catalog.json', title: '🔊 Ses Efekti Kataloğu', ph: 'Ara: bruh, vine boom, alkış, patlama, fail…',
+    norm: (c) => ({ title: c.title, tr: '', use: c.duration ? `${c.duration.toFixed(1)} sn` : '', hay: [c.title, ...(c.tags || [])].join(' '),
+      src: { kind: 'sfxlib', id: c.id, lib: c.id, page: c.page }, preview: { audio: c.audio, base: '_studio/sfx/previews/' }, opts: {} }) },
+};
+async function loadCatalog(kind) {
+  if (!S.cats[kind]) S.cats[kind] = ((await readJSON(CATALOGS[kind].path))?.data || []).map(CATALOGS[kind].norm);
+  return S.cats[kind];
+}
+// Kaynak seçici: Katalog / Link / Dosya → onPick({title, tr, src, preview, opts}) ya da onPick({file})
+function sourceModal(kind, onPick, opts = {}) {
+  const tabs = kind === 'gp' ? ['link', 'file'] : ['cat', 'link', 'file'];
+  const TL = { cat: '📚 Katalog', link: '🔗 Link', file: '📤 Dosya' };
+  openModal(`<h2>${KIND[kind].icon} ${opts.replace ? 'Değiştir' : 'Ekle'}: ${esc(KIND[kind].label)}</h2>
+    ${KIND[kind].hint ? `<p class="small muted" style="margin:4px 0 12px">${esc(KIND[kind].hint)}</p>` : ''}
+    <div class="seg src-tabs" id="srcTabs">${tabs.map((t) => `<button type="button" data-tab="${t}">${TL[t]}</button>`).join('')}</div>
+    <div id="srcPane" style="margin-top:12px"></div>`);
+  $('#modal .modal-card').classList.add('wide');
+  const pane = $('#srcPane');
+  const show = async (t) => {
+    $$('#srcTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+    if (t === 'link') {
+      pane.innerHTML = `<div class="stack"><div class="field"><label for="lnkUrl">Link</label><input type="url" id="lnkUrl" placeholder="YouTube, TikTok, X, Reddit, Tenor, myinstants, doğrudan mp4/mp3…"></div>
+        <div class="field"><label for="lnkTitle">Ne olduğunu kısaca yaz <span class="muted small">(opsiyonel)</span></label><input type="text" id="lnkTitle" placeholder="ör. Gandalf - You shall not pass, 0:03-0:06 arası"></div>
+        <div class="row"><button type="button" class="btn btn-primary" id="lnkAdd">Ekle</button><span class="small muted">${WORKER_NAME} indirir, keser ve önizlemesini kurgudan sonra koyar.</span></div></div>`;
+      $('#lnkUrl').focus();
+      $('#lnkAdd').onclick = () => {
+        const url = $('#lnkUrl').value.trim();
+        if (!/^https?:\/\/\S+$/.test(url)) return toast('Geçerli bir link yapıştır (https://…)', true);
+        const title = $('#lnkTitle').value.trim();
+        closeModal(); onPick({ title: title || shortUrl(url), src: { kind: 'link', url, title: title || undefined } });
+      };
+    } else if (t === 'file') {
+      pane.innerHTML = dropzoneHtml('modal', kind);
+      bindDropzone($('#srcPane .dropzone'), (file) => { closeModal(); onPick({ file }); });
+    } else {
+      pane.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+      const list = await loadCatalog(kind);
+      pane.innerHTML = `<input type="text" id="catQ" placeholder="${esc(CATALOGS[kind].ph)}" style="width:100%;margin-bottom:10px">
+        <p class="small muted" style="margin:0 0 8px">${list.length} öğe · önizlemek için tıkla, kullanmak için <b>Seç</b>.</p>
+        <div id="catGrid" class="cands canon-grid"></div>`;
+      const draw = (q = '') => {
+        const ql = q.toLowerCase().trim();
+        const hits = list.filter((c) => !ql || c.hay.toLowerCase().includes(ql)).slice(0, 240);
+        $('#catGrid').innerHTML = hits.map((c, k) => `<div class="cand">
+          ${entryMediaHtml({ slug: '' }, c, kind)}
+          <div class="cand-title"><b>${esc(c.title)}</b>${c.tr ? `<div class="small muted">${esc(c.tr)}</div>` : ''}${c.use ? `<div class="small">${kind === 'sfx' ? '⏱' : '🎯'} ${esc(c.use)}</div>` : ''}</div>
+          <div class="cand-actions"><button type="button" class="btn cand-pick" data-k="${k}">Seç</button></div></div>`).join('') || '<p class="muted">Sonuç yok.</p>';
+        hydrateThumbs();
+        $$('#catGrid [data-play]').forEach((el) => el.onclick = () => playPreview(el));
+        $$('#catGrid .cand-pick').forEach((b) => b.onclick = () => { const c = hits[+b.dataset.k]; closeModal(); onPick({ title: c.title, tr: c.tr, src: { ...c.src }, preview: { ...c.preview }, opts: { ...c.opts } }); });
+      };
+      $('#catQ').oninput = (e) => draw(e.target.value);
+      $('#catQ').focus();
+      draw();
+    }
+  };
+  $$('#srcTabs button').forEach((b) => b.onclick = () => show(b.dataset.tab));
+  show(tabs[0]);
+}
+function bindDropzone(dz, onFile) {
+  if (!dz) return;
+  const inp = dz.querySelector('input[type=file]');
+  inp.onchange = () => { if (inp.files[0]) onFile(inp.files[0]); inp.value = ''; };
+  dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('over'); };
+  dz.ondragleave = () => dz.classList.remove('over');
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('over'); const f = e.dataTransfer?.files?.[0]; if (f) onFile(f); };
+}
+async function startUpload(slug, sid, eid, file, kind) {
+  const okType = { gp: /^video\//, cutaway: /^(video\/|image\/gif)/, green: /^video\//, sfx: /^audio\// }[kind];
+  if (!okType.test(file.type || '') && !/\.(mp4|mov|webm|mkv|mp3|wav|ogg|m4a|gif)$/i.test(file.name)) {
+    toast(`Bu dosya türü olmaz (${file.type || file.name}). ${kind === 'sfx' ? 'Ses dosyası' : 'Video'} yükle.`, true); return false;
+  }
+  if (file.size > UPLOAD_MAX) { toast(`Dosya çok büyük (${fmtSize(file.size)}). En fazla 75 MB: kısaltıp yükle ya da link ver.`, true); return false; }
+  const key = `${sid}|${eid}`, uid = newId('u');
+  const branch = `upload/${slug}/${uid}`, path = safeName(file.name);
+  S.uploading.set(key, { pct: 0, name: file.name, size: file.size });
+  renderKeep(slug);
+  try {
+    await S.store.uploadFile(file, branch, path, (p) => {
+      const u = S.uploading.get(key); if (u) u.pct = p;
+      const bar = document.querySelector(`[data-upbar="${CSS.escape(key)}"]`); if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+      const t = document.querySelector(`[data-uppct="${CSS.escape(key)}"]`); if (t) t.textContent = `%${Math.round(p * 100)}`;
+    });
+    S.localMedia.set(uid, URL.createObjectURL(file));
+    const no = secIdx(S.games.get(slug), sid) + 1, who = S.user;
+    queueOp(slug, (x) => {
+      const e = findEntry(x, sid, eid); if (!e) return;
+      e.src = { kind: 'upload', uid, branch, path, name: file.name, size: file.size, by: who, at: nowIso() };
+      delete e.preview; delete e.review;
+    }, `S${no} ${KIND[kind].label.toLowerCase()} yüklendi (${file.name})`);
+    toast('Yüklendi ✓');
+    return true;
+  } catch (e) {
+    toast('Yüklenemedi: ' + (e.status === 403 || e.status === 404 ? 'token\'ın yazma izni yok' : e.status === 413 || e.status === 422 ? 'dosya GitHub için çok büyük, kısalt ya da link ver' : e.message), true);
+    return false;
+  } finally {
+    S.uploading.delete(key); renderKeep(slug);
+  }
+}
+// Kelime seçici (⏱ giriş anı): anlatımın kelimelerine tıklanır (1. tık = kelime, 2. tık = aralık)
+function atPicker(slug, chip, sid, eid) {
+  $$('.at-picker').forEach((x) => x.remove());
+  const g = S.games.get(slug), sec = g.sections.find((s) => s.id === sid), x = findEntry(g, sid, eid);
+  const words = (selectedOpt(sec)?.narration || '').split(/\s+/).filter(Boolean);
+  const clean = (t) => t.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
+  const cur = clean(x.at || '').toLowerCase();
+  let a = -1, b = -1;
+  if (cur) {
+    const cw = cur.split(/\s+/);
+    for (let i = 0; i + cw.length <= words.length; i++) {
+      if (cw.every((w, k) => clean(words[i + k]).toLowerCase() === w)) { a = i; b = i + cw.length - 1; break; }
+    }
+  }
+  const box = document.createElement('div');
+  box.className = 'at-picker';
+  const paint = () => {
+    box.querySelectorAll('.w').forEach((w) => w.classList.toggle('on', a >= 0 && +w.dataset.i >= a && +w.dataset.i <= b));
+    box.querySelector('.at-prev').textContent = a >= 0 ? `“${clean(words.slice(a, b + 1).join(' '))}”` : `otomatik (${WORKER_NAME} seçer)`;
+  };
+  box.innerHTML = `<div class="small muted">Anlatıcı hangi kelimeyi söylerken girsin? <b>Kelimeye tıkla</b>; birden fazla kelime için ikinci kelimeye de tıkla.</div>
+    <div class="at-words" lang="en">${words.map((w, i) => `<button type="button" class="w" data-i="${i}">${esc(w)}</button>`).join('')}</div>
+    <div class="row small" style="margin-top:8px;gap:8px"><span>Seçim: <b class="at-prev"></b></span><span class="spacer"></span>
+      <button type="button" class="btn small" data-act="auto">Otomatik</button>
+      <button type="button" class="btn small" data-act="close">Vazgeç</button>
+      <button type="button" class="btn btn-primary small" data-act="save">✓ Kaydet</button></div>`;
+  box.querySelectorAll('.w').forEach((w) => w.onclick = () => {
+    const i = +w.dataset.i;
+    if (a >= 0 && a === b && i !== a) { a = Math.min(a, i); b = Math.max(b, i); } else { a = b = i; }
+    paint();
+  });
+  const save = (v) => {
+    queueOp(slug, (y) => { const e = findEntry(y, sid, eid); if (e) e.at = v; }, `S${secIdx(g, sid) + 1} ${(x.title || '').slice(0, 30)} giriş anı`);
+    chip.textContent = v ? `⏱ “${v}”` : '⏱ giriş anı: otomatik'; box.remove();
+  };
+  box.querySelector('[data-act="save"]').onclick = () => save(a >= 0 ? clean(words.slice(a, b + 1).join(' ')) : '');
+  box.querySelector('[data-act="auto"]').onclick = () => save('');
+  box.querySelector('[data-act="close"]').onclick = () => box.remove();
+  chip.closest('.item-opts').after(box); paint();
+}
+function bindMediaEditors(slug, ed) {
+  const g = () => S.games.get(slug);
+  const parse = (k) => k.split('|');
+  const no = (sid) => secIdx(g(), sid) + 1;
+  const kindOf = (sid, eid) => { const e = findEntry(g(), sid, eid); return e ? entryKind(e) : 'gp'; };
+  if (!ed) return;
+  $$('[data-range]').forEach((inp) => inp.onchange = () => {
+    const [sid, eid] = parse(inp.dataset.range), v = inp.value.trim();
+    queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (e) e.range = v; }, `S${no(sid)} görüntü aralığı: ${v || 'boş'}`);
+  });
+  $$('[data-label]').forEach((inp) => inp.onchange = () => {
+    const [sid, eid] = parse(inp.dataset.label), v = inp.value.trim();
+    queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (e) e.label = v; }, `S${no(sid)} ara klip etiketi: ${v || 'boş'}`);
+  });
+  $$('.at-chip[data-at]').forEach((chip) => chip.onclick = () => { const [sid, eid] = parse(chip.dataset.at); atPicker(slug, chip, sid, eid); });
+  $$('[data-remove]').forEach((b) => b.onclick = () => {
+    const [sid, eid] = parse(b.dataset.remove), e = findEntry(g(), sid, eid);
+    if (!e || !confirm(`${KIND[entryKind(e)].label} kaldırılsın mı?\n${e.title || e.desc || ''}`)) return;
+    queueOp(slug, (x) => { const m = mediaOf(x.sections.find((s) => s.id === sid)); m.gameplay = (m.gameplay || []).filter((y) => y.id !== eid); m.items = (m.items || []).filter((y) => y.id !== eid); },
+      `S${no(sid)} ${KIND[entryKind(e)].label.toLowerCase()} kaldırıldı: ${(e.title || e.desc || '').slice(0, 40)}`);
+    renderKeep(slug);
+  });
+  $$('[data-replace]').forEach((b) => b.onclick = () => {
+    const [sid, eid] = parse(b.dataset.replace), kind = kindOf(sid, eid);
+    if (kind === 'gp') { const box = document.querySelector(`[data-replace-box="${CSS.escape(b.dataset.replace)}"]`); if (box) box.hidden = !box.hidden; return; }
+    sourceModal(kind, (pick) => applyPick(slug, sid, eid, kind, pick, true), { replace: true });
+  });
+  $$('[data-drop]').forEach((dz) => {
+    const [sid, eid] = parse(dz.dataset.drop);
+    bindDropzone(dz, (file) => startUpload(slug, sid, eid, file, kindOf(sid, eid)));
+  });
+  $$('[data-link-save]').forEach((b) => {
+    const k = b.dataset.linkSave, [sid, eid] = parse(k);
+    const inp = document.querySelector(`[data-link="${CSS.escape(k)}"]`);
+    const save = () => {
+      const url = inp.value.trim();
+      if (!/^https?:\/\/\S+$/.test(url)) return toast('Geçerli bir link yapıştır (https://…)', true);
+      queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (!e) return; e.src = { kind: 'link', url, by: S.user, at: nowIso() }; delete e.preview; delete e.review; },
+        `S${no(sid)} görüntü linki eklendi`);
+      toast('Link eklendi ✓'); renderKeep(slug);
+    };
+    b.onclick = save;
+    if (inp) inp.onkeydown = (e) => { if (e.key === 'Enter') save(); };
+  });
+  $$('[data-add-gp]').forEach((b) => b.onclick = () => {
+    const sid = b.dataset.addGp;
+    const desc = prompt('Bu görüntüde ne olmalı? (kısa açıklama, ör. "Kapıcı ultisini atıyor")', '');
+    if (desc === null) return;
+    const id = newId('g'), who = S.user;
+    queueOp(slug, (x) => { mediaOf(x.sections.find((s) => s.id === sid)).gameplay.push({ id, desc: desc.trim() || 'Ek görüntü', src: null, addedBy: who, by: who }); },
+      `S${no(sid)} görüntü yuvası eklendi`);
+    renderKeep(slug);
+  });
+  $$('[data-add-item]').forEach((b) => b.onclick = () => {
+    const [sid, kind] = parse(b.dataset.addItem);
+    sourceModal(kind, async (pick) => {
+      const id = newId('m');
+      queueOp(slug, (x) => { const m = mediaOf(x.sections.find((s) => s.id === sid)); (m.items = m.items || []).push({ id, kind, title: pick.file ? pick.file.name : pick.title || '', why: '', at: '', by: S.user }); },
+        `S${no(sid)} ${KIND[kind].label.toLowerCase()} eklendi`);
+      await applyPick(slug, sid, id, kind, pick, false, true);
+    });
+  });
+}
+// Seçilen kaynağı (katalog / link / dosya) bir öğeye uygular
+async function applyPick(slug, sid, eid, kind, pick, replacing, isNew = false) {
+  const g = S.games.get(slug), no = secIdx(g, sid) + 1;
+  if (pick.file) {
+    renderKeep(slug);
+    const ok = await startUpload(slug, sid, eid, pick.file, kind);
+    if (ok) queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (e) e.title = pick.file.name.replace(/\.[^.]+$/, ''); }, `S${no} ${KIND[kind].label.toLowerCase()} adı`);
+    else if (isNew) { queueOp(slug, (x) => { const m = mediaOf(x.sections.find((s) => s.id === sid)); m.items = m.items.filter((y) => y.id !== eid); }, `S${no} boş öğe kaldırıldı`); renderKeep(slug); }
+    return;
+  }
+  queueOp(slug, (x) => {
+    const e = findEntry(x, sid, eid); if (!e) return;
+    e.src = { ...pick.src, by: S.user, at: nowIso() }; e.title = pick.title || e.title; e.tr = pick.tr || '';
+    if (pick.preview) e.preview = pick.preview; else delete e.preview;
+    e.opts = { ...(pick.opts || {}) }; delete e.review;
+    if (replacing) e.why = '';
+    e.by = S.user;
+  }, `S${no} ${KIND[kind].label.toLowerCase()} ${replacing ? 'değişti' : 'eklendi'}: ${(pick.title || '').slice(0, 40)}`);
+  toast(`${KIND[kind].label}: ${pick.title} ✓`);
+  renderKeep(slug);
+}
+// Yeniden çizerken oynatıcı konumu, yazılmakta olan not ve sayfa kaydırması korunur
+function renderKeep(slug) {
+  const v = $('#revVideo'); if (v) S.revTime[slug] = v.currentTime;
+  const t = $('#noteText'); if (t) S.revDraft[slug] = t.value;
+  const mc = $('#mediaCard'); if (mc) S.mediaOpen[slug] = mc.open;
+  const y = window.scrollY;
+  renderGame(slug).then(() => window.scrollTo(0, y));
+}
+function updateCounts(slug) {
+  const g = S.games.get(slug); if (!g) return;
+  const st = stOf(g);
+  if (st === 'review') refreshReviewCounts(slug);
+  if (st === 'materials') {
+    const c = $('#mediaCounts'); if (c) c.innerHTML = mediaCountsHtml(g);
+    const b = $('#buildBtn'); if (b) b.disabled = S.uploading.size > 0;
+  }
+  if (st === 'script') updateScriptFooter(g);
+}
+
+/* ---------- İnceleme: sürümler + oynatıcı + zaman damgalı notlar + materyal değişiklikleri → "yeniden oluştur" ---------- */
 const fmtT = (t) => (t == null ? 'Genel' : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`);
 const latestVersion = (g) => (g.versions || []).reduce((a, v) => (!a || v.v > a.v ? v : a), null);
 const draftNotes = (g, v) => (g.reviewNotes || []).filter((n) => n.v === v).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9));
@@ -726,35 +1076,19 @@ function sentNotes(g, v) {
     ...(r.general ? [{ t: null, text: r.general, by: r.by, reply: r.generalReply, state: r.generalState, rev: r }] : []),
     ...(r.captions ? [{ t: null, text: `Altyazı → ${capLabel(r.captions)}`, by: r.by, reply: r.status === 'done' ? 'uygulandı' : '', rev: r }] : []),
     ...(r.selection || []).map((x, k) => ({ t: null, text: `Seçim: ${x}`, by: r.by, reply: r.selectionReplies?.[k] || (r.status === 'done' ? 'uygulandı' : ''), rev: r })),
+    ...(r.media || []).map((x, k) => ({ t: null, text: `Materyal: ${x}`, by: r.by, reply: r.mediaReplies?.[k] || (r.status === 'done' ? 'uygulandı' : ''), state: r.mediaStates?.[k], rev: r })),
     ...(r.text && !r.notes ? [{ t: null, text: r.text, by: r.by, reply: r.reply, rev: r }] : []),
   ]).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9));
 }
-// İncelemede ekip seçimleri de değiştirebilir: sürümün `selection` anlık görüntüsüyle şimdiki seçimler karşılaştırılır.
-function selectionDiff(g) {
-  const snap = latestVersion(g)?.selection; if (!snap) return [];
-  const out = [];
-  g.sections.forEach((s, i) => {
-    const old = snap[s.id]; if (!old) return;
-    if (old.opt !== s.selected) { out.push(`S${i + 1}: seçenek ${String(old.opt || '-').toUpperCase()} → ${String(s.selected || '-').toUpperCase()}`); return; }
-    (selectedOpt(s)?.needs || []).filter((n) => n.role === 'overlay' || n.role === 'cutaway').forEach((n) => {
-      const nm = (id) => (!id || id === 'none' ? 'Kullanma' : id === 'custom' ? `Başka klip${n.custom?.url ? ` (${n.custom.url})` : ''}` : (n.candidates || []).find((c) => c.id === id)?.title || id);
-      const kind = n.role === 'cutaway' ? 'ara klip' : 'green screen';
-      const was = old.needs?.[n.file] ?? null, now = n.chosen ?? null;
-      if ((was || 'none') !== (now || 'none')) out.push(`S${i + 1} ${kind}: ${nm(was)} → ${nm(now)}`);
-      else if (now && now !== 'none' && (old.at?.[n.file] || '') !== (n.at || '')) out.push(`S${i + 1} ${kind} giriş anı → “${n.at || 'otomatik'}”`);
-    });
-  });
-  return out;
-}
 function pendingChanges(g) {
   const lv = latestVersion(g); if (!lv) return 0;
-  return draftNotes(g, lv.v).length + ((g.reviewGeneral || '').trim() ? 1 : 0) + (lv.captions && g.settings?.captions !== lv.captions ? 1 : 0) + selectionDiff(g).length;
+  return draftNotes(g, lv.v).length + ((g.reviewGeneral || '').trim() ? 1 : 0) + (lv.captions && g.settings?.captions !== lv.captions ? 1 : 0) + mediaDiff(g).length;
 }
-const selDiffHtml = (g) => { const d = selectionDiff(g); return d.length ? `<div class="sel-diff"><b class="small">Seçim değişiklikleri</b>${d.map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>` : ''; };
+const selDiffHtml = (g) => { const d = mediaDiff(g); return d.length ? `<div class="sel-diff"><b class="small">Materyal değişiklikleri</b>${d.map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>` : ''; };
 function refreshReviewCounts(slug) {
   const g = S.games.get(slug); const rb = $('#rebuildBtn'); if (!g || !rb) return;
   const n = pendingChanges(g);
-  rb.disabled = !n; rb.textContent = `🔄 Videoyu yeniden oluştur${n ? ` (${n})` : ''}`;
+  rb.disabled = !n || S.uploading.size > 0; rb.textContent = `🔄 Videoyu yeniden oluştur${n ? ` (${n})` : ''}`;
   const d = $('#selDiffBox'); if (d) d.innerHTML = selDiffHtml(g);
 }
 function notesHtml(g, sel, canEdit, busy) {
@@ -770,25 +1104,37 @@ function notesHtml(g, sel, canEdit, busy) {
       ${n.reply ? `<div class="note-reply ${esc(n.state || '')}">${n.state === 'skipped' ? '↷' : n.state === 'question' ? '❓' : '✓'} ${esc(n.reply)}${n.rev.outV ? ` <span class="muted">→ v${n.rev.outV}</span>` : ''}</div>`
         : `<div class="note-reply wait">${busy ? `⏳ ${WORKER_NAME} uyguluyor` : 'sırada'}</div>`}</div></div>`).join('');
 }
+const BUSY = ['queued_build', 'drafting', 'voicing', 'queued_revision', 'revising'];
+function busyText(g) {
+  const lv = latestVersion(g), nv = (lv?.v || 0) + 1, st = stOf(g);
+  return {
+    queued_build: 'kurguya başlayacak',
+    drafting: 'ilk deneme videosunu kuruyor (geçici sesle; süreler burada belirlenir)',
+    voicing: `anlatıcı sesini ve ses miksajını ekliyor${lv?.draft ? ` (taslak v${lv.v} hazır, aşağıda izleyebilirsiniz)` : ''}`,
+    queued_revision: `notları sıraya aldı: v${nv} hazırlanacak`,
+    revising: `düzeltiyor: v${nv} hazırlanıyor`,
+  }[st] || 'çalışıyor';
+}
 function reviewHtml(g) {
   const vs = (g.versions || []).slice().sort((a, b) => a.v - b.v);
-  if (!vs.length) return `<section class="card" id="review"><h2>🎬 Kurgu</h2><p class="muted">Henüz video yok.</p></section>`;
+  const st = stOf(g), busy = BUSY.includes(st);
+  if (!vs.length) return `<section class="card" id="review"><h2>🎬 Kurgu</h2>${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${esc(busyText(g))}. Bitince burada görünür.</div>` : '<p class="muted">Henüz video yok.</p>'}</section>`;
   const lv = latestVersion(g);
-  const busy = ['queued_edit', 'editing', 'queued_revision'].includes(g.status);
-  const canEdit = g.status === 'review';
+  const canEdit = st === 'review';
   const sel = vs.find((v) => v.v === S.revView[g.slug]) || lv;
   const live = canEdit && sel.v === lv.v;
   const ICON = { section: '📍', cutaway: '🎞', overlay: '🟩', sfx: '🔊' };
-  const KIND = { cutaway: 'ara klip', overlay: 'green screen', sfx: 'ses efekti' };
+  const KINDTL = { cutaway: 'ara klip', overlay: 'green screen', sfx: 'ses efekti' };
   const tl = sel.timeline || [];
   const pend = pendingChanges(g);
   return `<section class="card review" id="review">
     <div class="row"><h2>🎬 Kurgu</h2>
-      <div class="seg ver-seg">${vs.map((v) => `<button type="button" data-ver="${v.v}" class="${v.v === sel.v ? 'on' : ''}">v${v.v}</button>`).join('')}</div>
+      <div class="seg ver-seg">${vs.map((v) => `<button type="button" data-ver="${v.v}" class="${v.v === sel.v ? 'on' : ''}" title="${v.draft ? 'Taslak: geçici sesle ilk deneme' : ''}">v${v.v}${v.draft ? ' · taslak' : ''}</button>`).join('')}</div>
       <span class="spacer"></span>
       <span class="small muted">${sel.duration ? `${Math.round(sel.duration)} sn · ` : ''}${sel.captions ? `altyazı: ${esc(capLabel(sel.captions))} · ` : ''}${fmtDate(sel.at)}</span>
     </div>
-    ${sel.notes ? `<p class="small ver-notes"><b>${esc(sel.by || WORKER_NAME)}:</b> ${esc(sel.notes)}</p>` : ''}
+    ${sel.draft ? `<p class="small ver-notes">🧪 <b>Taslak</b>: süreleri belirlemek için geçici sesle kuruldu; asıl anlatıcı sesi bir sonraki sürümde.</p>` : ''}
+    ${sel.notes ? `<p class="small ver-notes"><b>${esc(whoName(sel.by || WORKER_NAME))}:</b> ${esc(sel.notes)}</p>` : ''}
     <div class="review-grid">
       <div class="player">
         ${sel.preview ? `<video id="revVideo" playsinline controls preload="auto" data-src="${esc(sel.preview)}"></video><div class="player-loading" id="revLoading"><span class="spinner"></span></div>`
@@ -799,7 +1145,7 @@ function reviewHtml(g) {
         <div class="side-title">Ekranda neler var <span class="small muted">· tıklayınca o ana gider</span></div>
         <div class="tl-list">${tl.length ? tl.map((it) => `<div class="tl-row tl-${esc(it.type)}">
             <button type="button" class="tl-go" data-t="${it.t}"><span class="tl-time">${fmtT(it.t)}</span><span class="tl-ico">${ICON[it.type] || '•'}</span>
-              <span class="tl-label">${it.type === 'section' ? `<b>${esc(it.sec)}</b> ${esc(it.label)}` : `${esc(it.label)} <span class="muted">(${KIND[it.type] || it.type})</span>`}</span></button>
+              <span class="tl-label">${it.type === 'section' ? `<b>${esc(it.sec)}</b> ${esc(it.label)}` : `${esc(it.label)} <span class="muted">(${KINDTL[it.type] || it.type})</span>`}</span></button>
             ${live && it.type !== 'section' ? `<button type="button" class="tl-act" data-note-at="${it.t}" data-note-label="${esc(it.label)}" title="Bu öğe için not yaz">✎</button><button type="button" class="tl-act" data-rm-at="${it.t}" data-rm-label="${esc(it.label)}" title="“Kaldırılsın” notu ekle">🗑</button>` : ''}
           </div>`).join('') : '<p class="small muted">Bu sürüm için zaman çizelgesi yok.</p>'}</div>
       </div>
@@ -817,12 +1163,18 @@ function reviewHtml(g) {
         <div id="selDiffBox">${selDiffHtml(g)}</div>
         <textarea id="revGeneral" class="note-input" rows="2" placeholder="Genel not (opsiyonel): videonun bütünüyle ilgili istek">${esc(g.reviewGeneral || '')}</textarea>
         <div class="row"><button class="btn btn-primary" id="rebuildBtn" ${pend ? '' : 'disabled'}>🔄 Videoyu yeniden oluştur${pend ? ` (${pend})` : ''}</button>
-          <span class="small muted">${WORKER_NAME} notları uygular, v${lv.v + 1}'i hazırlar.</span><span class="spacer"></span>
+          <span class="small muted">${WORKER_NAME} notları ve materyal değişikliklerini uygular, v${lv.v + 1}'i hazırlar.</span><span class="spacer"></span>
           <button class="btn" id="approve">✓ Onayla, bitti</button></div>
       </div>` : ''}
-    ${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${g.status === 'queued_edit' ? 'kurguya başlayacak' : g.status === 'editing' ? `çalışıyor: v${lv.v + 1} hazırlanıyor` : `notları sıraya aldı: v${lv.v + 1} hazırlanacak`}. Bitince burada görünür.</div>` : ''}
-    ${g.status === 'done' ? publishBox(g) : ''}
+    ${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${esc(busyText(g))}. Bitince burada görünür.</div>` : ''}
+    ${st === 'done' ? publishBox(g) : ''}
   </section>`;
+}
+function mediaCardHtml(g, ed) {
+  if (!isV2(g) || !g.sections.some((s) => s.media)) return '';
+  const open = S.mediaOpen[g.slug] ?? (ed && mediaDiff(g).length > 0);
+  return `<details class="card media-card" id="mediaCard" ${open ? 'open' : ''}><summary><b>🎛 Materyaller</b> <span class="small muted">· ${ed ? 'değiştir / ekle / kaldır; değişiklikler “Videoyu yeniden oluştur”a eklenir' : 'salt okunur'}</span></summary>
+    <div class="stack" style="margin-top:12px">${g.sections.map((s, i) => mediaSectionHtml(g, s, i, ed, true)).join('')}</div></details>`;
 }
 
 function bindReview(slug) {
@@ -841,8 +1193,8 @@ function bindReview(slug) {
   const pu = $('#pubUrl'); if (pu) pu.onkeydown = (e) => { if (e.key === 'Enter') $('#pubSave')?.click(); };
   const pe = $('#pubEdit'); if (pe) pe.onclick = () => { S.pubEdit[slug] = true; renderGame(slug); };
   const pc = $('#pubCancel'); if (pc) pc.onclick = () => { S.pubEdit[slug] = false; renderGame(slug); };
-  const rerender = () => { const v = $('#revVideo'); if (v) S.revTime[slug] = v.currentTime; const t = $('#noteText'); if (t) S.revDraft[slug] = t.value; renderGame(slug); };
-  document.querySelectorAll('.ver-seg button').forEach((b) => b.onclick = () => { S.revView[slug] = +b.dataset.ver; S.revTime[slug] = 0; renderGame(slug); });
+  const rerender = () => renderKeep(slug);
+  $$('.ver-seg button').forEach((b) => b.onclick = () => { S.revView[slug] = +b.dataset.ver; S.revTime[slug] = 0; renderGame(slug); });
   const v = $('#revVideo');
   let noteT = null; // notun bağlanacağı an (null = oynatıcının anlık zamanı)
   const tEl = $('#noteTime span');
@@ -858,7 +1210,7 @@ function bindReview(slug) {
     v.addEventListener('play', () => { noteT = null; showT(); });
   }
   const seek = (t) => { if (!v) return; v.currentTime = Math.max(0, +t || 0); noteT = null; showT(); };
-  document.querySelectorAll('.tl-go').forEach((b) => b.onclick = () => seek(b.dataset.t));
+  $$('.tl-go').forEach((b) => b.onclick = () => seek(b.dataset.t));
   const txt = $('#noteText');
   const addNote = (t, text) => {
     const lv = latestVersion(cur());
@@ -875,24 +1227,25 @@ function bindReview(slug) {
     };
   }
   $('#noteTime')?.addEventListener('click', () => { noteT = now(); showT(); });
-  document.querySelectorAll('[data-note-at]').forEach((b) => b.onclick = () => {
+  $$('[data-note-at]').forEach((b) => b.onclick = () => {
     seek(b.dataset.noteAt); noteT = +b.dataset.noteAt; showT();
     if (txt) { txt.value = `${b.dataset.noteLabel}: `; txt.focus(); txt.setSelectionRange(txt.value.length, txt.value.length); }
   });
-  document.querySelectorAll('[data-rm-at]').forEach((b) => b.onclick = () => {
+  $$('[data-rm-at]').forEach((b) => b.onclick = () => {
     addNote(+b.dataset.rmAt, `${b.dataset.rmLabel}: kaldırılsın`); toast('Not eklendi: kaldırılsın'); rerender();
   });
-  document.querySelectorAll('[data-del-note]').forEach((b) => b.onclick = () => {
+  $$('[data-del-note]').forEach((b) => b.onclick = () => {
     const id = b.dataset.delNote;
     queueOp(slug, (x) => { x.reviewNotes = (x.reviewNotes || []).filter((n) => n.id !== id); }, 'not silindi'); rerender();
   });
-  document.querySelectorAll('#capSegR button').forEach((b) => b.onclick = () => {
+  $$('#capSegR button').forEach((b) => b.onclick = () => {
     const c = b.dataset.cap; queueOp(slug, (x) => { x.settings.captions = c; }, `altyazı: ${c}`); rerender();
   });
   const gen = $('#revGeneral');
   if (gen) gen.onchange = () => { const val = gen.value; queueOp(slug, (x) => { x.reviewGeneral = val; }, 'genel not'); rerender(); };
   const rb = $('#rebuildBtn');
   if (rb) rb.onclick = async () => {
+    if (S.uploading.size) return toast('Yükleme bitmeden gönderilemez', true);
     if (gen && gen.value !== (cur().reviewGeneral || '')) { const val = gen.value; queueOp(slug, (x) => { x.reviewGeneral = val; }, 'genel not'); }
     await flush(slug);
     const g = cur(); const lv = latestVersion(g); const n = pendingChanges(g);
@@ -904,13 +1257,13 @@ function bindReview(slug) {
       await mutateGame(slug, (x) => {
         const notes = (x.reviewNotes || []).filter((m) => m.v === lv.v).sort((a, b) => (a.t ?? 1e9) - (b.t ?? 1e9)).map(({ v: _v, ...m }) => m);
         const capChanged = lv.captions && x.settings.captions !== lv.captions;
-        const selection = selectionDiff(x);
+        const media = mediaDiff(x);
         (x.revisions = x.revisions || []).push({ id, at: nowIso(), by: S.user, v: lv.v, notes, general: (x.reviewGeneral || '').trim(),
-          ...(capChanged ? { captions: x.settings.captions } : {}), ...(selection.length ? { selection } : {}), status: 'queued' });
+          ...(capChanged ? { captions: x.settings.captions } : {}), ...(media.length ? { media } : {}), status: 'queued' });
         x.reviewNotes = (x.reviewNotes || []).filter((m) => m.v !== lv.v);
         x.reviewGeneral = '';
         x.status = 'queued_revision';
-        logLine(x, `v${lv.v} için ${notes.length} not gönderildi, yeniden oluşturma istendi.`);
+        logLine(x, `v${lv.v} için ${notes.length} not${media.length ? ` + ${media.length} materyal değişikliği` : ''} gönderildi, yeniden oluşturma istendi.`);
       }, `v${lv.v} düzeltme istendi`);
       await enqueue('revise', slug, { revision: id });
       toast('Kuyruğa alındı ✓'); renderGame(slug);
@@ -918,13 +1271,14 @@ function bindReview(slug) {
   };
   const ap = $('#approve');
   if (ap) ap.onclick = async () => {
-    if (pendingChanges(cur()) && !confirm('Gönderilmemiş notlar var. Yine de onaylansın mı?')) return;
+    if (pendingChanges(cur()) && !confirm('Gönderilmemiş notlar / materyal değişiklikleri var. Yine de onaylansın mı?')) return;
     await flush(slug);
     await mutateGame(slug, (x) => { x.status = 'done'; logLine(x, `v${latestVersion(x).v} onaylandı.`); }, 'onaylandı');
     toast('Tebrikler! 🎉'); renderGame(slug);
   };
 }
 
+/* ---------- oyun sayfası ---------- */
 async function renderGame(slug) {
   const app = $('#app');
   if (!S.games.has(slug)) {
@@ -934,10 +1288,52 @@ async function renderGame(slug) {
     S.games.set(slug, r.data);
   }
   const g = S.games.get(slug);
-  const editable = ['choosing', 'collecting'].includes(g.status);
-  const reviewing = (g.versions || []).length > 0 && ['queued_edit', 'editing', 'queued_revision', 'review', 'done'].includes(g.status);
-  const st = stats(g);
-  const stale = g.status === 'collecting' && g.exportSig && g.exportSig !== selectionSig(g);
+  const st = stOf(g);
+  const secs = g.sections || [];
+  let body = '', footer = '';
+  if (g.deleteRequested) body += `<div class="card del-banner">🗑 <b>${esc(g.deleteRequested.by || ADMIN.name)}</b> bu oyunun silinmesini istedi; ${WORKER_NAME} birkaç dakika içinde kaldıracak.
+    ${isAdmin() ? '<button type="button" class="btn btn-ghost small" id="undoDelete">Vazgeç</button>' : ''}</div>`;
+  if (['queued_research', 'researching'].includes(st)) {
+    body += `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${st === 'researching' ? `${WORKER_NAME} araştırıyor…` : `${WORKER_NAME} araştırma yapacak`}</h2>
+      <p class="muted">Oyunu ve topluluğun esprilerini (Reddit, Steam, YouTube yorumları…) araştırıyor. Kağan'ın bilgisayarı açıkken işlenir; metin seçenekleri hazır olunca burada görünür.</p></div>`;
+  }
+  if (st === 'queued_regen') body += `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>${WORKER_NAME} yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (secIdx(g, id) + 1)).join(', ') || 'tüm video')}. Bitince seçime devam edebilirsiniz.</div>`;
+  if ((st === 'script' || st === 'queued_regen') && secs.length) {
+    const editable = st === 'script';
+    const s = stats(g);
+    body += fixedLinesHtml(g) + `<section class="card">
+        <div class="row"><h2>🎯 Genel tema / istek</h2><span class="spacer"></span>
+          <label class="chip small"><input type="checkbox" id="regenAll" ${g.regenAll ? 'checked' : ''} ${editable ? '' : 'disabled'}> Tüm metni buna göre yeniden öner</label></div>
+        <textarea id="briefIn" class="note-input" rows="2" placeholder="Opsiyonel. Videonun genel havası veya mutlaka olmasını istediğiniz espri. Örn: “Pauselock meme'i ana espri olsun, final de ona bağlansın.”" ${editable ? '' : 'disabled'}>${esc(g.brief || '')}</textarea>
+      </section>` + secs.map((x, i) => scriptSectionHtml(x, i, g, editable)).join('');
+    if (editable) footer = `<div class="footer-bar"><div class="footer-inner">
+      <span class="stat"><b id="stChosen">${s.chosen}/${s.total}</b> <span class="small muted">bölüm</span></span>
+      <span class="stat" title="Seçilen repliklerin tahmini anlatım süresi"><b id="stSecs">≈${s.secs}</b> <span class="small muted">sn anlatım</span></span>
+      <span class="sec-nav">${secs.map((x, i) => `<button type="button" class="sec-dot ${x.selected ? 'done' : ''}" data-go="${esc(x.id)}" title="S${i + 1} · ${esc(x.title)}${x.selected ? ' · seçildi: ' + x.selected.toUpperCase() : ' · seçim yok'}">${i + 1}</button>`).join('')}</span>
+      <span class="spacer"></span>
+      <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
+      <button class="btn btn-primary" id="scriptOk" ${s.chosen === s.total ? '' : 'disabled'} title="Seçilen metinle materyal toplama başlar">✓ Metni onayla → Materyal</button>
+    </div></div>`;
+  }
+  if (['queued_materials', 'gathering'].includes(st)) {
+    body += `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${st === 'gathering' ? `${WORKER_NAME} materyal topluyor…` : `${WORKER_NAME} materyal toplayacak`}</h2>
+      <p class="muted">Her bölüm için oyun görüntüsü (önce resmi fragmanlar ve oynanış videoları), ara klip, green screen meme ve ses efekti arıyor. Bulamadığı görüntü için size yükleme alanı açacak.</p></div>` + scriptSummaryHtml(g, true);
+  }
+  if (st === 'materials') {
+    body += mediaHeadHtml(g) + secs.map((x, i) => mediaSectionHtml(g, x, i, true)).join('');
+    const miss = missingSecs(g).length;
+    footer = `<div class="footer-bar"><div class="footer-inner">
+      <span class="stat"><b>${secs.length - miss}/${secs.length}</b> <span class="small muted">bölümde görüntü</span></span>
+      <span class="sec-nav">${secs.map((x, i) => `<button type="button" class="sec-dot ${(x.media?.gameplay || []).some((y) => y.src) ? 'done' : ''}" data-go="${esc(x.id)}" title="S${i + 1} · ${esc(x.title)}">${i + 1}</button>`).join('')}</span>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" id="buildBtn" ${S.uploading.size ? 'disabled' : ''} title="${WORKER_NAME} ilk deneme videosunu kurar, sonra sesi ekler">▶ Kurguya başla</button>
+    </div></div>`;
+  }
+  if (BUSY.includes(st) || ['review', 'done'].includes(st)) {
+    body += reviewHtml(g);
+    if (isV2(g)) body += mediaCardHtml(g, st === 'review');
+    if (st === 'done' || !isV2(g)) body += scriptSummaryHtml(g);
+  }
   app.innerHTML = `
     <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
     <div class="row" style="margin-top:8px"><h1 lang="en">${esc(g.title)}</h1><span class="spacer"></span>${driveLink(g)}${statusPill(g)}</div>
@@ -950,54 +1346,149 @@ async function renderGame(slug) {
     ${pipelineHtml(g)}
     <div class="stack" style="margin-top:20px">
       ${workerBanner()}
-      ${['queued_research', 'researching'].includes(g.status) ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${g.status === 'researching' ? `${WORKER_NAME} araştırıyor…` : `${WORKER_NAME} araştırma yapacak`}</h2><p class="muted">Kağan'ın bilgisayarı açıkken işlenir; senaryo seçenekleri hazır olunca burada görünür.</p></div>` : ''}
-      ${g.status === 'queued_regen' ? `<div class="card" style="border-color:var(--info)"><span class="spinner"></span> <b>${WORKER_NAME} yeni seçenekler hazırlıyor:</b> ${esc((g.regenSections || []).map((id) => 'S' + (g.sections.findIndex((s) => s.id === id) + 1)).join(', ') || 'tüm video')}. Bitince seçimlere devam edebilirsiniz.</div>` : ''}
-      ${['queued_edit', 'editing', 'queued_revision'].includes(g.status) && !reviewing ? `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${esc(STATUS[g.status].label)}</h2><p class="muted">${WORKER_NAME} kurguyu hazırlıyor. Bittiğinde video linki aşağıda görünecek.</p></div>` : ''}
+      ${body}
       ${g.summary ? `<details class="card"><summary>Oyun özeti</summary><p>${esc(g.summary)}</p><p class="small muted">Detaylı araştırma: repo içinde <code>games/${esc(g.slug)}/research.md</code></p></details>` : ''}
-      ${(g.versions || []).length || g.status === 'review' ? reviewHtml(g) : ''}
-      ${g.status === 'collecting' ? materialsSummaryHtml(g) : (g.materials || []).length && !reviewing && !['choosing', 'queued_regen'].includes(g.status) ? materialsHtml(g) : ''}
-      ${stale ? `<div class="card" style="border-color:var(--warn)">⚠️ Seçimler çıktıdan sonra değişti. Materyal listesini güncellemek için <b>Çıktı al</b>'a tekrar bas.</div>` : ''}
-      ${g.sections?.length && reviewing ? `<details class="card script-details"><summary><b>📝 Senaryo ve seçimler</b> <span class="small muted">· ${g.status === 'review' ? 'meme / seçenek değiştirebilirsiniz; değişiklikler “Videoyu yeniden oluştur”a eklenir' : 'salt okunur'}</span></summary>
-        <div class="stack" style="margin-top:14px">${g.sections.map((s, i) => sectionHtml(s, i, false, g.opening, g.slug, g)).join('')}</div></details>` : ''}
-      ${g.sections?.length && !reviewing ? `
-        <section class="card">
-          <div class="row"><h2>Altyazı</h2><span class="spacer"></span>
-            <div class="seg" id="capSeg">${CAPTIONS.map((c) => `<button type="button" data-cap="${c.v}" class="${g.settings.captions === c.v ? 'on' : ''}" ${editable ? '' : 'disabled'}>${c.label}</button>`).join('')}</div></div>
-          <p class="small muted" id="capHint" style="margin:10px 0 0">${esc(CAPTIONS.find((c) => c.v === g.settings.captions)?.hint)}</p>
-        </section>
-        <section class="card">
-          <div class="row"><h2>🎯 Genel tema / istek</h2><span class="spacer"></span>
-            <label class="chip small"><input type="checkbox" id="regenAll" ${g.regenAll ? 'checked' : ''} ${editable ? '' : 'disabled'}> Tüm videoyu buna göre yeniden öner</label></div>
-          <textarea id="briefIn" class="note-input" rows="2" placeholder="Opsiyonel. Videonun genel havası veya mutlaka olmasını istediğiniz espri. Örn: “Pauselock meme'i ana espri olsun, final de ona bağlansın.”" ${editable ? '' : 'disabled'}>${esc(g.brief || '')}</textarea>
-        </section>
-        ${g.sections.map((s, i) => sectionHtml(s, i, editable, g.opening, g.slug, g)).join('')}` : ''}
-      ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(l.by)}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
+      ${(g.log || []).length ? `<details class="card"><summary>Geçmiş</summary><div class="log">${g.log.slice().reverse().map((l) => `<div>${fmtDate(l.at)} · <b>${esc(whoName(l.by))}</b> · ${esc(l.msg)}</div>`).join('')}</div></details>` : ''}
     </div>
-    ${g.sections?.length && editable ? `<div class="footer-bar"><div class="footer-inner">
-      <span class="stat"><b id="stChosen">${st.chosen}/${st.total}</b> <span class="small muted">bölüm</span></span>
-      <span class="stat"><b id="stSecs">≈${st.secs}</b> <span class="small muted">sn anlatım</span></span>
-      <span class="stat" title="Seçili seçeneklerde kullanılacak tam ekran ara klip sayısı (hedef 3–4)"><b id="stCuts">${cutCount(g)}</b> <span class="small muted">ara klip</span></span>
-      <span class="sec-nav">${g.sections.map((s, i) => `<button type="button" class="sec-dot ${s.selected ? 'done' : ''}" data-go="${esc(s.id)}" title="S${i + 1} · ${esc(s.title)}${s.selected ? ' · seçildi: ' + s.selected.toUpperCase() : ' · seçim yok'}">${i + 1}</button>`).join('')}</span>
-      <span class="spacer"></span>
-      <button class="btn" id="regenBtn" ${regenCount(g) ? '' : 'hidden'}>🔄 Tekrar yap (<span id="regenN">${regenCount(g)}</span>)</button>
-      ${g.status === 'collecting' ? `<button class="btn" id="startBtn">▶ Başla</button>` : ''}
-      <button class="btn btn-primary" id="exportBtn" ${st.chosen === st.total ? '' : 'disabled'}>${exportFresh(g) ? '📋 Çıktıyı göster' : 'Çıktı al'}</button>
-    </div></div>` : ''}
+    ${footer}
   `;
-  bindGame(g);
+  bindGame(slug);
 }
 
-// Çıktıyı etkileyen her şeyin imzası: seçili seçenekler, meme/ses seçimleri, kendi linkler, altyazı.
-// Değişmediyse "Çıktı al" yeniden oluşturmaz, kayıtlı çıktıyı gösterir.
-function selectionSig(g) {
-  const raw = JSON.stringify([g.settings?.captions, ...g.sections.map((s) => {
-    const o = selectedOpt(s);
-    return [s.selected || '-', ...(o?.needs || []).map((n) => [n.file, n.chosen || '', n.custom?.url || '', n.at || ''])];
-  })]);
-  let h = 5381; for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) | 0;
-  return 'v3:' + (h >>> 0).toString(36);
+function updateScriptFooter(g) {
+  const st = stats(g);
+  const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
+  const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
+  $$('.sec-dot').forEach((d) => d.classList.toggle('done', !!g.sections.find((x) => x.id === d.dataset.go)?.selected));
+  const s = $('#stSecs'); if (s) { s.textContent = `≈${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
+  const b = $('#scriptOk'); if (b) b.disabled = st.chosen !== st.total;
 }
-const exportFresh = (g) => !!(g.materials?.length && g.exportSig && g.exportSig === selectionSig(g));
+
+function bindGame(slug) {
+  const cur = () => S.games.get(slug);
+  const g0 = cur(), st = stOf(g0);
+  const take = $('#takeOwner');
+  if (take) take.onclick = () => { queueOp(slug, (x) => { x.owners = [...new Set([...owners(x), S.user])]; x.owner = x.owners[0]; logLine(x, `${S.user} projeye katıldı.`); }, 'çalışan eklendi'); renderGame(slug); };
+  $('#editGame').onclick = () => editGameModal(slug);
+  const ud = $('#undoDelete');
+  if (ud) ud.onclick = async () => {
+    try {
+      const job = cur().deleteRequested?.job;
+      if (job) await S.store.del(job, `[${S.user}] ${cur().title}: silme isteği geri alındı`);
+      await mutateGame(slug, (x) => { delete x.deleteRequested; logLine(x, 'Silme isteği geri alındı.'); }, 'silme geri alındı');
+      toast('Silme iptal edildi ✓'); renderGame(slug);
+    } catch (e) { toast('Olmadı: ' + e.message, true); }
+  };
+  hydrateThumbs();
+  $$('[data-play]').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
+  $$('.sec-dot').forEach((d) => d.onclick = () => document.getElementById('sec-' + d.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  $$('#capSeg button').forEach((b) => b.onclick = () => {
+    const v = b.dataset.cap;
+    queueOp(slug, (x) => { x.settings.captions = v; }, `altyazı: ${v}`);
+    $$('#capSeg button').forEach((y) => y.classList.toggle('on', y === b));
+  });
+  if (st === 'script') bindScript(slug);
+  if (st === 'materials') {
+    bindMediaEditors(slug, true);
+    const back = $('#backToScript');
+    if (back) back.onclick = async () => {
+      if (!confirm('Metin aşamasına dönülsün mü? Materyaller korunur; metnini değiştirdiğin bölümlere ' + WORKER_NAME + ' yeniden bakar.')) return;
+      await flush(slug);
+      await mutateGame(slug, (x) => { x.status = 'script'; logLine(x, `${S.user} metin aşamasına döndü.`); }, 'metne geri dönüldü');
+      renderGame(slug);
+    };
+    const bb = $('#buildBtn');
+    if (bb) bb.onclick = async () => {
+      if (S.uploading.size) return toast('Yükleme bitmesini bekle', true);
+      await flush(slug);
+      const g = cur(), miss = missingSecs(g);
+      const msg = miss.length ? `${miss.length} bölümde oyun görüntüsü yok (${miss.map((s) => 'S' + (secIdx(g, s.id) + 1)).join(', ')}). ${WORKER_NAME} bulabilirse tamamlar, bulamazsa o bölümde elindeki en yakın görüntüyü kullanır.\nYine de kurguya başlansın mı?`
+        : `${WORKER_NAME} ilk deneme videosunu kuracak, sonra anlatıcı sesini ekleyecek. Başlansın mı?`;
+      if (!confirm(msg)) return;
+      bb.disabled = true;
+      try {
+        await mutateGame(slug, (x) => { x.status = 'queued_build'; x.mediaBase = mediaSnapshot(x); logLine(x, 'Materyaller onaylandı, kurgu başlatıldı.'); }, 'kurgu başlatıldı');
+        await enqueue('build', slug);
+        toast('Kurgu kuyruğa alındı ✓'); renderGame(slug);
+      } catch (e) { toast('Başlatılamadı: ' + e.message, true); bb.disabled = false; }
+    };
+  }
+  if (BUSY.includes(st) || ['review', 'done'].includes(st)) {
+    bindMediaEditors(slug, st === 'review');
+    const mc = $('#mediaCard'); if (mc) mc.ontoggle = () => { S.mediaOpen[slug] = mc.open; };
+    bindReview(slug);
+  }
+}
+
+function bindScript(slug) {
+  const g = new Proxy({}, { get: (_, k) => S.games.get(slug)[k] }); // kayıttan sonra güncel nesne
+  $$('.opt').forEach((btn) => btn.onclick = (ev) => {
+    if (ev.target.closest('a')) return;
+    const sid = btn.dataset.sec, oid = btn.dataset.opt;
+    const sec = g.sections.find((s) => s.id === sid);
+    const val = sec.selected === oid ? null : oid;
+    queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).selected = val; }, `${sid} → ${val || 'boş'}`);
+    btn.parentElement.querySelectorAll('.opt').forEach((b) => b.classList.toggle('selected', b.dataset.opt === val));
+    btn.closest('section').classList.toggle('has-sel', !!val);
+  });
+  $$('.opt').forEach((btn) => btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); } });
+  $$('.regen-btn').forEach((b) => b.onclick = () => {
+    const sid = b.dataset.regen;
+    const sec = g.sections.find((s) => s.id === sid);
+    const val = !sec.regen;
+    const note = document.querySelector(`[data-note="${sid}"]`).value.trim();
+    if (val && !note) { toast('Önce not kutusuna yeni temayı / isteğini yaz.', true); document.querySelector(`[data-note="${sid}"]`).focus(); return; }
+    queueOp(slug, (x) => { const s = x.sections.find((s) => s.id === sid); s.regen = val; s.note = note; }, `${sid} yeniden öner: ${val ? 'evet' : 'hayır'}`);
+    b.classList.toggle('btn-primary', val); b.classList.toggle('btn-ghost', !val);
+    b.textContent = val ? '🔄 Yeniden önerilecek ✓' : '🔄 Bu bölümü yeniden öner';
+  });
+  $$('[data-note]').forEach((ta) => ta.onchange = () => {
+    const sid = ta.dataset.note, v = ta.value;
+    queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).note = v; }, `${sid} notu`);
+  });
+  const brief = $('#briefIn');
+  if (brief) brief.onchange = () => { const v = brief.value.trim(); queueOp(slug, (x) => { x.brief = v; }, 'genel tema'); };
+  const ra = $('#regenAll');
+  if (ra) ra.onchange = () => {
+    if (ra.checked && !$('#briefIn').value.trim()) { ra.checked = false; toast('Önce genel tema alanına isteğini yaz.', true); $('#briefIn').focus(); return; }
+    const v = ra.checked, b = $('#briefIn').value.trim();
+    queueOp(slug, (x) => { x.regenAll = v; x.brief = b; }, `tüm metin yeniden: ${v}`);
+  };
+  const rgb = $('#regenBtn');
+  if (rgb) rgb.onclick = async () => {
+    const ids = g.regenAll ? g.sections.map((s) => s.id) : g.sections.filter((s) => s.regen).map((s) => s.id);
+    if (!ids.length) return;
+    if (!confirm(`${g.regenAll ? 'Tüm metin' : ids.length + ' bölüm'} notlarınıza göre yeniden önerilecek (bu bölümlerdeki seçimler sıfırlanır).\nDevam?`)) return;
+    rgb.disabled = true;
+    try {
+      await flush(slug);
+      await mutateGame(slug, (x) => {
+        x.status = 'queued_regen'; x.regenSections = ids;
+        logLine(x, `Yeniden öneri istendi: ${g.regenAll ? 'tüm metin' : ids.map((id) => 'S' + (secIdx(x, id) + 1)).join(', ')}.`);
+      }, 'yeniden öneri istendi');
+      await enqueue('regenerate', slug, { sections: ids, brief: g.brief || '', all: !!g.regenAll });
+      toast('Kuyruğa alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rgb.disabled = false; }
+  };
+  const ok = $('#scriptOk');
+  if (ok) ok.onclick = async () => {
+    const s = stats(g);
+    if (s.chosen !== s.total) return toast('Her bölüm için bir replik seç', true);
+    if (regenCount(g) && !confirm('Yeniden öneri için işaretli bölümler var; onaylarsan işaretler yok sayılır. Devam?')) return;
+    if (!confirm(`Metin onaylansın mı? ${WORKER_NAME} her bölüm için oyun görüntüsü, ara klip, green screen ve ses efekti arayacak.`)) return;
+    ok.disabled = true;
+    try {
+      await flush(slug);
+      await mutateGame(slug, (x) => {
+        x.status = 'queued_materials'; x.scriptApprovedAt = nowIso(); x.scriptApprovedBy = S.user; x.regenAll = false;
+        x.sections.forEach((s) => { delete s.regen; });
+        logLine(x, `Metin onaylandı (≈${stats(x).secs} sn anlatım), materyal toplama kuyruğa alındı.`);
+      }, 'metin onaylandı');
+      await enqueue('materials', slug);
+      toast('Materyal toplama kuyruğa alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Gönderilemedi: ' + e.message, true); ok.disabled = false; }
+  };
+}
 
 /* ---------- önizleme medyası (özel repodan blob olarak) ---------- */
 const blobCache = new Map();
@@ -1006,7 +1497,7 @@ function blob(path) {
   return blobCache.get(path);
 }
 function hydrateThumbs() {
-  const imgs = [...document.querySelectorAll('img[data-src]')];
+  const imgs = $$('img[data-src]');
   const io = new IntersectionObserver((entries) => entries.forEach((en) => {
     if (!en.isIntersecting) return;
     io.unobserve(en.target);
@@ -1019,7 +1510,7 @@ let currentAudio = null;
 const VOL = { v: Math.min(1, Math.max(0, parseFloat(ls.get('studio.vol') ?? '0.35'))), muted: ls.get('studio.mute') === '1' };
 const volIcon = () => (VOL.muted || VOL.v === 0 ? '🔇' : VOL.v < 0.5 ? '🔉' : '🔊');
 function applyVolume(src) {
-  document.querySelectorAll('video.cand-video, audio').forEach((m) => { if (m !== src) { m.volume = VOL.v; m.muted = VOL.muted; } });
+  $$('video.cand-video, video.slot-video, audio').forEach((m) => { if (m !== src) { m.volume = VOL.v; m.muted = VOL.muted; } });
   if (currentAudio && currentAudio !== src) { currentAudio.volume = VOL.v; currentAudio.muted = VOL.muted; }
   const b = document.getElementById('volBtn'); if (b) b.textContent = volIcon();
   const r = document.getElementById('volRange'); if (r && document.activeElement !== r) r.value = Math.round(VOL.v * 100);
@@ -1064,391 +1555,7 @@ async function playPreview(el) {
   } catch { toast('Video yüklenemedi', true); el.classList.remove('loading'); }
 }
 
-const feedbackCount = (g) => g.sections.reduce((k, s) => k + s.options.reduce((m, o) => m + (o.needs || []).filter((n) => n.feedback && !n.feedbackDone).length, 0), 0);
-const regenCount = (g) => (g.regenAll ? g.sections.length : g.sections.filter((s) => s.regen).length) + feedbackCount(g);
-
-/* ---------- Meme Kanonu galerisi ---------- */
-async function canonModal(onAdd) {
-  openModal(`<h2>🏆 Meme Kanonu</h2><div class="empty"><span class="spinner"></span></div>`);
-  if (!S.canon) S.canon = (await readJSON('_studio/memes/canon.json'))?.data || [];
-  const pv = (f) => `_studio/memes/previews/${f}`;
-  const draw = (q = '') => {
-    const ql = q.toLowerCase();
-    const list = S.canon.filter((c) => !ql || [c.name, c.tr, c.use, ...(c.tags || [])].join(' ').toLowerCase().includes(ql));
-    $('#canonGrid').innerHTML = list.map((c) => `<div class="cand" data-cid="${esc(c.id)}">
-      <button type="button" class="cand-media" data-play="${esc(pv(c.video))}" data-kind="meme"><img data-src="${esc(pv(c.thumb))}" alt=""><span class="play-badge">▶</span></button>
-      <div class="cand-title"><b>${esc(c.name)}</b><div class="small muted">${esc(c.tr)}</div><div class="small">🎯 ${esc(c.use)}</div></div>
-      <div class="cand-actions"><button type="button" class="btn canon-pick" data-cid="${esc(c.id)}">Seç</button></div></div>`).join('') || '<p class="muted">Sonuç yok.</p>';
-    hydrateThumbs();
-    document.querySelectorAll('#canonGrid .cand-media').forEach((el) => el.onclick = () => playPreview(el));
-    document.querySelectorAll('.canon-pick').forEach((b) => b.onclick = () => {
-      const c = S.canon.find((x) => x.id === b.dataset.cid);
-      // Seçenek zaten belli; tek tıkla ekle. Anı (kelime) sonradan ⏱ etiketinden yazılabilir.
-      closeModal(); onAdd(c, ''); toast(`${c.name} eklendi ✓ · istersen ⏱ ile anını belirt`);
-    });
-  };
-  $('#modalBody').innerHTML = `<h2>🏆 Meme Kanonu</h2>
-    <p class="small muted" style="margin-top:0">Herkesin bildiği ${S.canon.length} meme, orijinal sahneleriyle. Önizlemek için tıkla, eklemek için <b>Seç</b> (tek tık).</p>
-    <input type="text" id="canonQ" placeholder="Ara: polis, kaçış, şaşkınlık, para, ölüm, siyasi…" style="width:100%;margin-bottom:10px">
-    <div id="canonGrid" class="cands canon-grid"></div>`;
-  $('#modal .modal-card').classList.add('wide');
-  $('#canonQ').oninput = (e) => draw(e.target.value);
-  draw();
-}
-
-// Green Screen Kataloğu (oyun ekranına bindirme için) — _studio/memes/greens.json
-async function greensModal(onPick) {
-  openModal(`<h2>🟩 Green Screen Kataloğu</h2><div class="empty"><span class="spinner"></span></div>`);
-  if (!S.greens) S.greens = (await readJSON('_studio/memes/greens.json'))?.data || [];
-  const pv = (c, f) => `${c.pvBase || '_studio/memes/previews/'}${f}`;
-  const draw = (q = '') => {
-    const ql = q.toLowerCase();
-    const list = S.greens.filter((c) => !ql || [c.name, c.tr, c.use, ...(c.tags || [])].join(' ').toLowerCase().includes(ql));
-    $('#greenGrid').innerHTML = list.map((c) => `<div class="cand">
-      <button type="button" class="cand-media" data-play="${esc(pv(c, c.video))}" data-kind="meme"><img data-src="${esc(pv(c, c.thumb))}" alt=""><span class="play-badge">▶</span></button>
-      <div class="cand-title"><b>${esc(c.name)}</b><div class="small muted">${esc(c.tr || '')}</div>${c.use ? `<div class="small">🎯 ${esc(c.use)}</div>` : ''}</div>
-      <div class="cand-actions"><button type="button" class="btn green-pick" data-gid="${esc(c.id)}">Seç</button></div></div>`).join('') || '<p class="muted">Sonuç yok.</p>';
-    hydrateThumbs();
-    document.querySelectorAll('#greenGrid .cand-media').forEach((el) => el.onclick = () => playPreview(el));
-    document.querySelectorAll('.green-pick').forEach((b) => b.onclick = () => {
-      const c = S.greens.find((x) => x.id === b.dataset.gid);
-      closeModal(); onPick(c); toast(`${c.name} seçildi ✓`);
-    });
-  };
-  $('#modalBody').innerHTML = `<h2>🟩 Green Screen Kataloğu</h2>
-    <p class="small muted" style="margin-top:0">${S.greens.length} green screen meme. Oyun görüntüsünün üstüne bindirilir. Önizlemek için tıkla, kullanmak için <b>Seç</b>.</p>
-    <input type="text" id="greenQ" placeholder="Ara: patlama, para, polis, emoji, gözlük, iskelet…" style="width:100%;margin-bottom:10px">
-    <div id="greenGrid" class="cands canon-grid"></div>`;
-  $('#modal .modal-card').classList.add('wide');
-  $('#greenQ').oninput = (e) => draw(e.target.value);
-  draw();
-}
-
-const cutCount = (g) => g.sections.reduce((k, s) => k + ((selectedOpt(s)?.needs || []).filter((n) => n.type === 'meme' && n.chosen !== 'none' && (n.role === 'cutaway' || !n.role)).length), 0);
-function updateFooter(g) {
-  const cc = $('#stCuts'); if (cc) { const n = cutCount(g); cc.textContent = n; cc.style.color = n > 5 ? 'var(--warn)' : ''; }
-  const st = stats(g);
-  const rb = $('#regenBtn'); if (rb) { const n = regenCount(g); rb.hidden = !n; $('#regenN').textContent = n; }
-  const c = $('#stChosen'); if (c) c.textContent = `${st.chosen}/${st.total}`;
-  document.querySelectorAll('.sec-dot').forEach((d) => d.classList.toggle('done', !!g.sections.find((x) => x.id === d.dataset.go)?.selected));
-  const s = $('#stSecs'); if (s) { s.textContent = `≈${st.secs}`; s.style.color = st.secs > 58 ? 'var(--bad)' : ''; }
-  const b = $('#exportBtn'); if (b) { b.disabled = st.chosen !== st.total; b.textContent = exportFresh(g) ? '📋 Çıktıyı göster' : 'Çıktı al'; }
-}
-
-function bindGame(g0) {
-  const slug = g0.slug;
-  // Kayıttan sonra S.games yeni nesneyi tutar; handler'lar her zaman güncel nesneyi kullanmalı.
-  const cur = () => S.games.get(slug);
-  const g = new Proxy({}, { get: (_, k) => cur()[k] });
-  const editable = ['choosing', 'collecting'].includes(g.status);
-  const selEditable = editable || g.status === 'review'; // incelemede de meme/seçenek seçimi değişebilir
-  const take = $('#takeOwner');
-  if (take) take.onclick = () => { queueOp(slug, (x) => { x.owners = [...new Set([...owners(x), S.user])]; x.owner = x.owners[0]; logLine(x, `${S.user} projeye katıldı.`); }, 'çalışan eklendi'); renderGame(slug); };
-  $('#editGame').onclick = () => editGameModal(slug);
-
-  hydrateThumbs();
-  document.querySelectorAll('.cand-media[data-play]').forEach((el) => el.onclick = (ev) => { ev.stopPropagation(); playPreview(el); });
-  document.querySelectorAll('.cand-pick').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    if (!b.closest('.opt')?.classList.contains('selected')) return toast('Önce bu seçeneği seç, sonra memeyi.');
-    const [sid, oid, file, cid] = b.dataset.pick.split('|');
-    const find = (x) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
-    const nd = find(g);
-    const val = nd.chosen === cid ? (isOptional(nd) ? 'none' : null) : cid;
-    queueOp(slug, (x) => { find(x).chosen = val; }, `${file} → ${val || 'boş'}`);
-    const box = b.closest('.cands');
-    box.querySelectorAll('.cand').forEach((c) => {
-      const on = c.dataset.cand === val;
-      c.classList.toggle('chosen', on);
-      const pb = c.querySelector('.cand-pick'); pb.classList.toggle('btn-primary', on); pb.textContent = on ? '✓ Seçildi' : 'Seç';
-    });
-    const hint = box.previousElementSibling?.querySelector('.muted.small'); if (hint) hint.textContent = `· ${val ? '✓ seçildi' : 'birini seç'}`;
-    const form = box.querySelector('.custom-form'); if (form) { form.hidden = val !== 'custom'; if (val === 'custom') form.querySelector('input').focus(); }
-    const fl = document.querySelector(`[data-flow="${sid}|${oid}"]`);
-    if (fl) { const sec = cur().sections.find((x) => x.id === sid); fl.innerHTML = flowHtml(sec, sec.options.find((x) => x.id === oid)); }
-  });
-  document.querySelectorAll('.custom-form input').forEach((inp) => {
-    inp.onclick = (ev) => ev.stopPropagation();
-    inp.onchange = () => {
-      const [sid, oid, file] = (inp.dataset.custom || inp.dataset.customNote).split('|');
-      const form = inp.closest('.custom-form');
-      const url = form.querySelector('.custom-url').value.trim(), note = form.querySelector('.custom-note').value.trim(), who = S.user;
-      queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file).custom = { url, note, by: who }; }, `${file} kendi linki`);
-    };
-  });
-  document.querySelectorAll('.cands a').forEach((a) => a.addEventListener('click', (ev) => ev.stopPropagation()));
-  const findNeed = (x, sid, oid, file) => x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid).needs.find((n) => n.file === file);
-  // + Kanondan meme ekle
-  document.querySelectorAll('.canon-add').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    const [sid, oid] = b.dataset.canonAdd.split('|');
-    canonModal(async (c, at) => {
-      const idx = g.sections.findIndex((s) => s.id === sid) + 1;
-      const file = `S${idx}_meme_${c.id}.mp4`, who = S.user;
-      queueOp(slug, (x) => {
-        const o = x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid);
-        o.needs = o.needs || [];
-        if (o.needs.some((n) => n.file === file)) return;
-        o.needs.push({ type: 'meme', role: 'cutaway', optional: true, label: '', file, desc: `${c.name} (${c.tr})`, at, added: true, addedBy: who,
-          candidates: [{ id: c.lib, title: c.name, source: 'canon', page: c.page, duration: c.duration, style: c.style, thumb: c.thumb, video: c.video, pvBase: '_studio/memes/previews/' }], chosen: c.lib });
-      }, `${file} kanondan eklendi`);
-      renderGame(slug);
-    });
-  });
-  // ⏱ Giriş anı: anlatımın kelimelerine tıklayarak seç (1. tık = kelime, 2. tık = aralık)
-  const atLabel = (v) => (v ? `⏱ giriş anı: “${v}”` : '⏱ giriş anı: otomatik · belirle');
-  const clean = (t) => t.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
-  document.querySelectorAll('.at-chip').forEach((chip) => chip.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    document.querySelectorAll('.at-picker').forEach((x) => x.remove());
-    const [sid, oid, file] = chip.dataset.at.split('|');
-    const opt = g.sections.find((x) => x.id === sid).options.find((x) => x.id === oid);
-    const words = opt.narration.split(/\s+/).filter(Boolean);
-    const cur = clean((findNeed(g, sid, oid, file).at || '').replace(/"/g, '')).toLowerCase();
-    let a = -1, b = -1;
-    if (cur) {  // mevcut değer anlatımda geçiyorsa işaretle
-      const cw = cur.split(/\s+/);
-      for (let i = 0; i + cw.length <= words.length; i++) {
-        if (cw.every((w, k) => clean(words[i + k]).toLowerCase() === w)) { a = i; b = i + cw.length - 1; break; }
-      }
-    }
-    const box = document.createElement('div');
-    box.className = 'at-picker';
-    box.onclick = (e) => e.stopPropagation();
-    const paint = () => {
-      box.querySelectorAll('.w').forEach((w) => w.classList.toggle('on', a >= 0 && +w.dataset.i >= a && +w.dataset.i <= b));
-      box.querySelector('.at-prev').textContent = a >= 0 ? `“${clean(words.slice(a, b + 1).join(' '))}”` : 'otomatik (Askeri Ücretli Çalışan seçer)';
-    };
-    box.innerHTML = `<div class="small muted">Meme anlatıcı hangi kelimeyi söylerken girsin? <b>Kelimeye tıkla</b>; birden fazla kelime için ikinci kelimeye de tıkla.</div>
-      <div class="at-words">${words.map((w, i) => `<button type="button" class="w" data-i="${i}">${esc(w)}</button>`).join('')}</div>
-      <div class="row small" style="margin-top:8px;gap:8px"><span>Seçim: <b class="at-prev"></b></span><span class="spacer"></span>
-        <button type="button" class="btn small" data-act="auto">Otomatik</button>
-        <button type="button" class="btn small" data-act="close">Vazgeç</button>
-        <button type="button" class="btn btn-primary small" data-act="save">✓ Kaydet</button></div>`;
-    box.querySelectorAll('.w').forEach((w) => w.onclick = () => {
-      const i = +w.dataset.i;
-      if (a >= 0 && a === b && i !== a) { a = Math.min(a, i); b = Math.max(b, i); } else { a = b = i; }
-      paint();
-    });
-    const save = (v) => {
-      queueOp(slug, (x) => { findNeed(x, sid, oid, file).at = v; }, `${file} anı`);
-      chip.textContent = atLabel(v); box.remove();
-    };
-    box.querySelector('[data-act="save"]').onclick = () => save(a >= 0 ? clean(words.slice(a, b + 1).join(' ')) : '');
-    box.querySelector('[data-act="auto"]').onclick = () => save('');
-    box.querySelector('[data-act="close"]').onclick = () => box.remove();
-    chip.closest('.need-head').after(box); paint();
-  });
-  document.querySelectorAll('.back-to-choose, .step.go-back').forEach((b) => b.onclick = async () => {
-    if (!confirm('Seçim aşamasına geri dönülsün mü? Materyal listesi silinir (Drive\'daki liste de kaldırılır); seçimler bitince tekrar "Çıktı al".')) return;
-    try {
-      await flush(slug);
-      await mutateGame(slug, (x) => {
-        x.status = 'choosing';
-        for (const k of ['materials', 'exportSig', 'exportedAt', 'exportedBy']) delete x[k];
-        logLine(x, `${S.user} seçim aşamasına geri döndü; materyal listesi sıfırlandı.`);
-      }, 'seçime geri dönüldü');
-      try { await S.store.del(`games/${slug}/MATERIALS.md`, `[${S.user}] ${cur().title}: materyal listesi kaldırıldı`); } catch (e) { console.warn(e); }
-      toast('Seçim aşamasına dönüldü ✓'); renderGame(slug);
-    } catch (e) { toast('Olmadı: ' + e.message, true); }
-  });
-  document.querySelectorAll('.canon-into').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    const [sid, oid, file] = b.dataset.canonInto.split('|');
-    canonModal((c) => {
-      queueOp(slug, (x) => {
-        const n = findNeed(x, sid, oid, file);
-        n.candidates = n.candidates || [];
-        if (!n.candidates.some((k) => k.id === c.lib)) {
-          n.candidates.push({ id: c.lib, title: c.name, tr: c.tr, canon: c.id, source: 'canon', page: c.page, duration: c.duration, style: c.style,
-            thumb: c.thumb, video: c.video, pvBase: '_studio/memes/previews/', ...(c.clip ? { clip: c.clip } : {}), addedBy: S.user });
-        }
-        n.chosen = c.lib;
-      }, `${file} → kanon: ${c.id}`);
-      renderGame(slug);
-    });
-  });
-  document.querySelectorAll('.green-add').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    const [sid, oid, file] = b.dataset.greenAdd.split('|');
-    greensModal((c) => {
-      queueOp(slug, (x) => {
-        const n = findNeed(x, sid, oid, file);
-        n.candidates = n.candidates || [];
-        if (!n.candidates.some((k) => k.id === c.lib)) {
-          n.candidates.push({ id: c.lib, title: c.name, tr: c.tr, source: 'greens', page: c.page, duration: c.duration, style: 'green',
-            thumb: c.thumb, video: c.video, pvBase: c.pvBase, ...(c.clip ? { clip: c.clip } : {}), addedBy: S.user });
-        }
-        n.chosen = c.lib;
-      }, `${file} → katalog: ${c.id}`);
-      renderGame(slug);
-    });
-  });
-  document.querySelectorAll('.reopen-btn').forEach((b) => b.onclick = () => {
-    const sec = b.closest('section'); const on = sec.classList.toggle('reopen');
-    b.textContent = on ? '✓ Değiştirmeyi bitir' : '✏️ Seçimi değiştir';
-  });
-  document.querySelectorAll('.sec-dot').forEach((d) => d.onclick = () => document.getElementById('sec-' + d.dataset.go)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  document.querySelectorAll('.need-fb').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    if (!editable) return toast('Bu aşamada seçimler kilitli.');
-    const [sid, oid, file] = b.dataset.fb.split('|');
-    const n = findNeed(g, sid, oid, file), who = S.user;
-    if (n.feedback && !n.feedbackDone) {
-      queueOp(slug, (x) => { delete findNeed(x, sid, oid, file).feedback; }, `${file} 👎 geri alındı`);
-    } else {
-      const reason = prompt('Bu meme neden uymuyor? (kısa yaz, örn. "repliği tekrar ediyor", "alakasız", "komik değil")', '');
-      if (reason === null) return;
-      queueOp(slug, (x) => { const m = findNeed(x, sid, oid, file); m.feedback = { by: who, at: nowIso(), reason: reason.trim() }; delete m.feedbackDone; }, `${file} 👎`);
-    }
-    renderGame(slug);
-  });
-  document.querySelectorAll('.need-del').forEach((b) => b.onclick = (ev) => {
-    ev.stopPropagation();
-    const [sid, oid, file] = b.dataset.del.split('|');
-    queueOp(slug, (x) => { const o = x.sections.find((s) => s.id === sid).options.find((o) => o.id === oid); o.needs = o.needs.filter((n) => n.file !== file); }, `${file} kaldırıldı`);
-    renderGame(slug);
-  });
-
-  document.querySelectorAll('.opt').forEach((btn) => btn.onclick = (ev) => {
-    if (ev.target.closest('.cands, .refs, .at-picker')) return;
-    if (ev.target.closest('.peek-btn')) { const on = btn.classList.toggle('peek'); ev.target.textContent = on ? '▾ ayrıntıları gizle' : '▸ ayrıntıları göster'; return; }
-    if (!selEditable) return toast('Bu aşamada seçimler kilitli.');
-    const sid = btn.dataset.sec, oid = btn.dataset.opt;
-    const sec = g.sections.find((s) => s.id === sid);
-    const val = sec.selected === oid ? null : oid;
-    queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).selected = val; }, `${sid} → ${val || 'boş'}`);
-    btn.parentElement.querySelectorAll('.opt').forEach((b) => b.classList.toggle('selected', b.dataset.opt === val));
-    btn.closest('section').classList.toggle('has-sel', !!val);
-    if (val) btn.classList.remove('peek');
-    updateFooter(g);
-  });
-  document.querySelectorAll('.regen-btn').forEach((b) => b.onclick = () => {
-    const sid = b.dataset.regen;
-    const sec = g.sections.find((s) => s.id === sid);
-    const val = !sec.regen;
-    const note = document.querySelector(`[data-note="${sid}"]`).value.trim();
-    if (val && !note) { toast('Önce not kutusuna yeni temayı / isteğini yaz.', true); document.querySelector(`[data-note="${sid}"]`).focus(); return; }
-    queueOp(slug, (x) => { const s = x.sections.find((s) => s.id === sid); s.regen = val; s.note = note; }, `${sid} yeniden öner: ${val ? 'evet' : 'hayır'}`);
-    b.classList.toggle('btn-primary', val); b.classList.toggle('btn-ghost', !val);
-    b.textContent = val ? '🔄 Yeniden önerilecek ✓' : '🔄 Bu bölümü yeniden öner';
-    updateFooter(g);
-  });
-  const brief = $('#briefIn');
-  if (brief) brief.onchange = () => { const v = brief.value.trim(); queueOp(slug, (x) => { x.brief = v; }, 'genel tema'); };
-  const ra = $('#regenAll');
-  if (ra) ra.onchange = () => {
-    if (ra.checked && !$('#briefIn').value.trim()) { ra.checked = false; toast('Önce genel tema alanına isteğini yaz.', true); $('#briefIn').focus(); return; }
-    const v = ra.checked, b = $('#briefIn').value.trim();
-    queueOp(slug, (x) => { x.regenAll = v; x.brief = b; }, `tüm video yeniden: ${v}`); updateFooter(g);
-  };
-  const rgb = $('#regenBtn');
-  if (rgb) rgb.onclick = async () => {
-    const ids = g.regenAll ? g.sections.map((s) => s.id) : g.sections.filter((s) => s.regen).map((s) => s.id);
-    const fb = feedbackCount(g);
-    if (!ids.length && !fb) return;
-    const parts = [ids.length ? `${g.regenAll ? 'Tüm video' : ids.length + ' bölüm'} notlarınıza göre yeniden önerilecek (bu bölümlerdeki seçimler sıfırlanır)` : '',
-      fb ? `${fb} meme 👎 geri bildirimine göre değiştirilecek` : ''].filter(Boolean);
-    if (!confirm(parts.join('\n') + '.\nDevam?')) return;
-    rgb.disabled = true;
-    try {
-      await flush(slug);
-      await mutateGame(slug, (x) => {
-        if (ids.length) { x.status = 'queued_regen'; x.regenSections = ids; }
-        logLine(x, [ids.length ? `Yeniden öneri istendi: ${g.regenAll ? 'tüm video' : ids.map((id) => 'S' + (x.sections.findIndex((s) => s.id === id) + 1)).join(', ')}.` : '', fb ? `${fb} meme için 👎 geri bildirimi gönderildi.` : ''].filter(Boolean).join(' '));
-      }, 'yeniden öneri istendi');
-      await enqueue('regenerate', slug, { sections: ids, brief: g.brief || '', all: !!g.regenAll, feedback: fb > 0 });
-      toast('Kuyruğa alındı ✓'); renderGame(slug);
-    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rgb.disabled = false; }
-  };
-  document.querySelectorAll('[data-note]').forEach((ta) => ta.onchange = () => {
-    const sid = ta.dataset.note, v = ta.value;
-    queueOp(slug, (x) => { x.sections.find((s) => s.id === sid).note = v; }, `${sid} notu`);
-  });
-  document.querySelectorAll('#capSeg button').forEach((b) => b.onclick = () => {
-    const v = b.dataset.cap;
-    queueOp(slug, (x) => { x.settings.captions = v; }, `altyazı: ${v}`);
-    document.querySelectorAll('#capSeg button').forEach((y) => y.classList.toggle('on', y === b));
-    $('#capHint').textContent = CAPTIONS.find((c) => c.v === v).hint;
-  });
-  document.querySelectorAll('[data-mat]').forEach((cb) => cb.onchange = () => {
-    const k = cb.dataset.mat, v = cb.checked, who = S.user;
-    queueOp(slug, (x) => { const m = x.materials.find((m) => (m.file || m.id) === k); if (m) { m.done = v; m.doneBy = v ? who : null; } }, `materyal ${v ? '✓' : '✗'} ${k}`);
-    cb.closest('.mat').classList.toggle('done', v);
-  });
-  const drive = $('#driveIn');
-  if (drive) drive.onchange = () => { const v = drive.value.trim(); queueOp(slug, (x) => { x.settings.mediaFolderUrl = v; }, 'Drive linki'); };
-
-  const exp = $('#exportBtn');
-  if (exp) exp.onclick = async (ev, force = false) => {
-    await flush(slug);
-    if (!force && exportFresh(cur())) return exportModal(cur()); // değişiklik yok → kayıtlı çıktı
-    const miss = missingChoices(g).length;
-    if (miss && !confirm(`${miss} meme/ses efekti için seçim yapılmadı. Bunlarda ilk aday kullanılacak. Devam edilsin mi?`)) return;
-    exp.disabled = true; exp.textContent = 'Hazırlanıyor…';
-    try {
-      await flush(slug);
-      const ng = await mutateGame(slug, (x) => {
-        x.materials = buildMaterials(x);
-        x.exportedAt = nowIso(); x.exportedBy = S.user; x.exportSig = selectionSig(x);
-        x.status = 'collecting';
-        logLine(x, 'Çıktı alındı, materyal listesi oluşturuldu.');
-      }, 'çıktı alındı');
-      await S.store.put(`games/${slug}/MATERIALS.md`, materialsMarkdown(ng), `[${S.user}] ${ng.title}: materyal listesi`,
-        (await S.store.get(`games/${slug}/MATERIALS.md`))?.sha);
-      await renderGame(slug);
-      exportModal(ng);
-      toast('Çıktı oluşturuldu ✓ — Drive klasörüne de birkaç dakika içinde kopyalanır');
-    } catch (e) { toast('Çıktı alınamadı: ' + e.message, true); exp.disabled = false; exp.textContent = 'Çıktı al'; }
-  };
-  const show = $('#showExport'); if (show) show.onclick = () => exportModal(g);
-
-  const start = $('#startBtn');
-  if (start) start.onclick = async () => {
-    const missing = g.materials.filter((m) => !m.done).length;
-    if (!g.settings.mediaFolderUrl && !confirm('Google Drive klasör linki girilmedi. Yine de başlansın mı?')) return;
-    if (missing && !confirm(`${missing} materyal henüz işaretlenmedi. Eksiklerle başlansın mı? (${WORKER_NAME} eksikleri kendisi tamamlamaya çalışır)`)) return;
-    start.disabled = true;
-    try {
-      await flush(slug);
-      await mutateGame(slug, (x) => { x.status = 'queued_edit'; logLine(x, 'Kurgu başlatıldı.'); }, 'kurgu başlatıldı');
-      await enqueue('build', slug);
-      toast('Kurgu kuyruğa alındı ✓'); renderGame(slug);
-    } catch (e) { toast('Başlatılamadı: ' + e.message, true); start.disabled = false; }
-  };
-  bindReview(slug);
-}
-
-function exportModal(g) {
-  const md = materialsMarkdown(g);
-  openModal(`
-    <h2>📋 ${esc(g.title)}: Çıktı</h2>
-    <p class="muted small">Oluşturan: <b>${esc(g.exportedBy || '?')}</b> · ${fmtDate(g.exportedAt)}${exportFresh(g) ? ' · <span style="color:var(--good)">güncel ✓</span>' : ' · <span style="color:var(--warn)">seçimler değişti, yeniden oluşturun</span>'}<br>
-      Bu liste oyunun Drive klasöründe de <code>MATERIALS.md</code> olarak duruyor. Materyalleri topladıkça aşağıdaki Materyaller kartında kutuları işaretleyin, hepsi bitince <b>▶ Başla</b>.</p>
-    <div class="script-box" id="mdBox">${esc(md)}</div>
-    <div class="row" style="margin-top:12px">
-      <button class="btn btn-primary" id="mdCopy">Kopyala</button>
-      <button class="btn" id="mdDl">.md indir</button>
-      ${g.settings?.mediaFolderUrl ? driveLink(g) : ''}
-      <span class="spacer"></span>
-      <button class="btn btn-ghost" id="mdRegen" title="Seçimler aynı olsa da listeyi baştan oluştur">↻ Yeniden oluştur</button>
-    </div>`);
-  $('#mdRegen').onclick = () => { closeModal(); const b = $('#exportBtn'); if (b && b.onclick) b.onclick(null, true); };
-  const copy = async (t) => { try { await navigator.clipboard.writeText(t); toast('Kopyalandı ✓'); } catch { toast('Kopyalanamadı', true); } };
-  $('#mdCopy').onclick = () => copy(md);
-  $('#mdDl').onclick = () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
-    a.download = `${g.slug}-materyaller.md`; a.click(); URL.revokeObjectURL(a.href);
-  };
-}
-
-/* ---------- entegrasyonlar (API anahtarları şifreli saklanır) ---------- */
+/* ---------- entegrasyonlar (API anahtarları şifreli saklanır; sadece yönetici değiştirir) ---------- */
 const ELEVEN_MODELS = [
   ['eleven_multilingual_v2', 'Multilingual v2 (en doğal, önerilen)'],
   ['eleven_v3', 'Eleven v3 (en duygusal, alpha)'],
@@ -1468,32 +1575,37 @@ async function renderIntegrations() {
   app.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
   const cur = await readJSON('config/integrations.json');
   const el = cur?.data?.elevenlabs || {};
+  const ro = !isAdmin();
+  const dis = ro ? 'disabled' : '';
   const num = (id, label, v, min, max, step, hint) => `<div class="field"><label for="${id}">${label} <span class="muted small" id="${id}V">${v}</span></label>
-    <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}"><span class="small muted">${hint}</span></div>`;
+    <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${v}" ${dis}><span class="small muted">${hint}</span></div>`;
   app.innerHTML = `
     <a href="#/" class="small muted" style="text-decoration:none">← Tüm oyunlar</a>
     <h1 style="margin:8px 0 6px">Entegrasyonlar</h1>
     <p class="muted" style="margin:0 0 20px">API anahtarları tarayıcıda şifrelenir; sadece Kağan'ın bilgisayarındaki ${WORKER_NAME} çözebilir. Kaydedilen anahtar burada bir daha gösterilmez, sadece değiştirilebilir.</p>
+    ${ro ? `<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">🔒 Bu ayarları yalnız ${ADMIN.name} değiştirebilir. Anlatıcı sesi her videoda aynı kalır.</div>` : ''}
     <section class="card stack">
       <div class="row"><h2>🎙️ ElevenLabs</h2><span class="spacer"></span>
-        <span class="pill dot ${el.apiKeyEnc ? 'st-done' : 'st-queued_edit'}">${el.apiKeyEnc ? `Anahtar ayarlı · ${esc(el.apiKeySetBy)} · ${fmtDate(el.apiKeySetAt)}` : 'Anahtar yok'}</span></div>
+        <span class="pill dot ${el.apiKeyEnc ? 'st-done' : 'st-queued_build'}">${el.apiKeyEnc ? `Anahtar ayarlı · ${esc(el.apiKeySetBy)} · ${fmtDate(el.apiKeySetAt)}` : 'Anahtar yok'}</span></div>
       <div class="field"><label for="elKey">API anahtarı ${el.apiKeyEnc ? '(değiştirmek için yeni anahtarı yaz)' : ''}</label>
-        <input type="password" id="elKey" autocomplete="off" placeholder="${el.apiKeyEnc ? '•••••••• (kayıtlı)' : 'sk_…'}">
+        <input type="password" id="elKey" autocomplete="off" placeholder="${el.apiKeyEnc ? '•••••••• (kayıtlı)' : 'sk_…'}" ${dis}>
         <span class="small muted">ElevenLabs → sol alt <b>Developers</b> → <b>API Keys</b> → Create. İzinlerde Text to Speech ve Voices açık olsun.</span></div>
       <div class="field"><label for="elVoice">Ses kimliği (Voice ID)</label>
-        <input type="text" id="elVoice" value="${esc(el.voiceId || '')}" placeholder="örn. 21m00Tcm4TlvDq8ikWAM">
+        <input type="text" id="elVoice" value="${esc(el.voiceId || '')}" placeholder="örn. 21m00Tcm4TlvDq8ikWAM" ${dis}>
         <span class="small muted">ElevenLabs → Voices → anlatıcı sesinin yanındaki ⋯ → <b>Copy voice ID</b>.</span></div>
       <div class="field"><label for="elModel">Model</label>
-        <select id="elModel">${ELEVEN_MODELS.map(([v, l]) => `<option value="${v}" ${el.modelId === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <select id="elModel" ${dis}>${ELEVEN_MODELS.map(([v, l]) => `<option value="${v}" ${el.modelId === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${num('elStab', 'Stabilite', el.stability ?? 0.45, 0, 1, 0.05, 'Düşük = daha duygulu/değişken, yüksek = daha düz ve tutarlı.')}
       ${num('elSim', 'Benzerlik', el.similarity ?? 0.8, 0, 1, 0.05, 'Orijinal sese ne kadar sadık kalsın.')}
       ${num('elStyle', 'Stil abartısı', el.style ?? 0.2, 0, 1, 0.05, 'Yükseldikçe daha "oyunculu" okur (deadpan için düşük tutun).')}
       ${num('elSpeed', 'Hız', el.speed ?? 1.0, 0.7, 1.2, 0.05, '60 saniyeye sığdırmak için 1.0–1.1 iyi çalışır.')}
-      <div class="row"><button class="btn btn-primary" id="elSave">Kaydet</button><span id="elMsg" class="small"></span></div>
+      ${ro ? '' : '<div class="row"><button class="btn btn-primary" id="elSave">Kaydet</button><span id="elMsg" class="small"></span></div>'}
     </section>`;
   ['elStab', 'elSim', 'elStyle', 'elSpeed'].forEach((id) => { const r = $('#' + id); r.oninput = () => ($('#' + id + 'V').textContent = r.value); });
-  $('#elSave').onclick = async () => {
-    const btn = $('#elSave'); btn.disabled = true; $('#elMsg').textContent = 'Kaydediliyor…';
+  const save = $('#elSave');
+  if (save) save.onclick = async () => {
+    if (!isAdmin()) return toast(`Yalnız ${ADMIN.name} değiştirebilir`, true);
+    save.disabled = true; $('#elMsg').textContent = 'Kaydediliyor…';
     try {
       const keyPlain = $('#elKey').value.replace(/\s+/g, '');
       const enc = keyPlain ? await encryptForWorker(keyPlain) : null;
@@ -1508,13 +1620,14 @@ async function renderIntegrations() {
         catch (err) { if (!(err.status === 409 || err.status === 422) || i === 2) throw err; }
       }
       toast('Kaydedildi ✓'); renderIntegrations();
-    } catch (err) { $('#elMsg').innerHTML = `<span style="color:var(--bad)">Kaydedilemedi: ${esc(err.message)}</span>`; btn.disabled = false; }
+    } catch (err) { $('#elMsg').innerHTML = `<span style="color:var(--bad)">Kaydedilemedi: ${esc(err.message)}</span>`; save.disabled = false; }
   };
 }
 
 /* ---------- worker durumu (Kağan'ın PC'sindeki arka plan Claude) ---------- */
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
-const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', build: 'kurgu', revise: 'düzeltme', refresh_media: 'meme adaylarını yenileme' };
+const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', materials: 'materyal toplama', build: 'kurgu + ses', revise: 'düzeltme',
+  delete_game: `silme (${ADMIN.name})`, refresh_media: 'meme adaylarını yenileme' };
 function jobName(j) {
   const m = /^\d{8}T\d{6}-([a-z_]+)-(.+)$/.exec(j || '');
   if (!m) return j || '';
@@ -1524,14 +1637,14 @@ function workerView(w0) {
   if (!w0) return null;
   const w = { ...w0, job: jobName(w0.job) };
   const ageH = (Date.now() - new Date(w.at).getTime()) / 36e5;
-  if (w.state === 'running' && ageH > 3) return { cls: 'warn', short: '⚠️ Worker yanıt vermiyor', long: `Son durum ${fmtTime(w.at)}: "${w.job}" çalışıyordu ama 3 saattir haber yok. Kağan'ın bilgisayarı kapanmış olabilir; açılınca iş devam eder.` };
+  if (w.state === 'running' && ageH > 3) return { cls: 'warn', short: '⚠️ Çırak yanıt vermiyor', long: `Son durum ${fmtTime(w.at)}: "${w.job}" çalışıyordu ama 3 saattir haber yok. Kağan'ın bilgisayarı kapanmış olabilir; açılınca iş devam eder.` };
   if (w.state === 'running') return { cls: 'run', short: '🟢 Çalışıyor', long: `${WORKER_NAME} şu işi yapıyor: ${w.job}` };
   if (w.state === 'limited') {
     const reset = w.resetAt ? fmtTime(w.resetAt) : 'bilinmiyor';
     return { cls: 'warn', short: `⏸ Limit doldu · ${reset}`, long: `${WORKER_NAME}'ın Claude kullanım limiti doldu, "${w.job}" yarım kaldı. ${reset} civarında limit sıfırlanınca kaldığı yerden otomatik devam edecek. (${w.message})`, banner: true };
   }
-  if (w.state === 'error') return { cls: 'bad', short: '⚠️ Worker hatası', long: `"${w.job || ''}" işinde hata oldu: ${w.message}. Kuyruktaki iş 5 dakika sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.`, banner: true };
-  return { cls: 'idle', short: '● Boşta', long: `Worker boşta. ${w.message || ''} (${fmtTime(w.at)})` };
+  if (w.state === 'error') return { cls: 'bad', short: '⚠️ Çırak hatası', long: `"${w.job || ''}" işinde hata oldu: ${w.message}. Kuyruktaki iş 5 dakika sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.`, banner: true };
+  return { cls: 'idle', short: '● Boşta', long: `${WORKER_NAME} boşta. ${w.message || ''} (${fmtTime(w.at)})` };
 }
 async function loadWorkerStatus() {
   try { S.worker = (await readJSON('config/worker_status.json'))?.data || null; } catch { S.worker = null; }
@@ -1564,7 +1677,7 @@ async function renderTaskList() {
   const line = (j, i) => {
     const isRun = j.name === running;
     const title = S.games.get(j.slug)?.title || j.slug;
-    const extra = j.type === 'regenerate' && j.payload?.sections ? ` (${j.payload.all ? 'tüm video' : j.payload.sections.length + ' bölüm'})` : '';
+    const extra = j.type === 'regenerate' && j.payload?.sections ? ` (${j.payload.all ? 'tüm metin' : j.payload.sections.length + ' bölüm'})` : '';
     return `<div class="task ${isRun ? 'run' : ''}">
       <span class="task-n">${isRun ? (w.state === 'limited' ? '⏸' : '▶') : i + 1}</span>
       <div style="flex:1;min-width:0"><b>${esc(title)}</b>: ${esc(JOB_LABEL[j.type] || j.type)}${esc(extra)}
@@ -1599,7 +1712,7 @@ function humanizeAction(t) {
 function parseActivity(c) {
   const m = /^\[([^\]]+)\]\s*(.*)$/.exec(c.msg);
   if (!m) return { who: 'Claude (geliştirme)', icon: '🛠', text: c.msg, game: null, at: c.at, system: true };
-  const isWorker = /^Claude( \(worker\))?$|^Worker$|^Askeri Ücretli Çalışan$/.test(m[1]);
+  const isWorker = /^Claude( \(worker\))?$|^Worker$|^Askeri Ücretli Çalışan$|^Çırak$/.test(m[1]);
   const who = isWorker ? WORKER_NAME : m[1], rest = m[2];
   if (isWorker && /^durum: /.test(rest)) {
     // "[Worker] durum: <state> | <mesaj> | job=<iş> | reset=<iso>" → anlamlı satır; eski biçim (sadece state) atlanır
@@ -1617,7 +1730,7 @@ function parseActivity(c) {
   }
   if (/^iş kuyruğu: /.test(rest)) {
     const [, type, slug] = /^iş kuyruğu: (\S+) (\S+)/.exec(rest) || [];
-    return { who, icon: '📥', text: `${S.games.get(slug)?.title || slug} için ${JOB_LABEL[type] || type} işini kuyruğa ekledi`, game: slug, at: c.at };
+    return { who, icon: type === 'delete_game' ? '🗑' : '📥', text: `${S.games.get(slug)?.title || slug} için ${JOB_LABEL[type] || type} işini kuyruğa ekledi`, game: slug, at: c.at };
   }
   const ng = /^Yeni oyun: (.+)$/.exec(rest);
   if (ng) { const sl = slugify(ng[1]); return { who, icon: '🆕', text: 'yeni oyun ekledi', title: S.games.get(sl)?.title || ng[1], game: S.games.has(sl) ? sl : null, at: c.at }; }
@@ -1625,7 +1738,7 @@ function parseActivity(c) {
   if (!g) return { who, icon: who === WORKER_NAME ? '🤖' : '✏️', text: rest, game: null, at: c.at };
   const raw = g[1].trim(), found = [...S.games.values()].find((x) => x.title === raw || x.slug === raw.toLowerCase());
   const slug = found?.slug || null, title = found?.title || raw;
-  const icon = who === WORKER_NAME ? '🤖' : /çıktı|başlatıldı|onaylandı|düzeltme/i.test(g[2]) ? '🚦' : '✏️';
+  const icon = who === WORKER_NAME ? '🤖' : /silin/i.test(g[2]) ? '🗑' : /çıktı|başlatıldı|onaylandı|düzeltme|onay/i.test(g[2]) ? '🚦' : /yüklendi|yükleme/i.test(g[2]) ? '📤' : '✏️';
   return { who, icon, text: humanizeAction(g[2]), title, game: slug, at: c.at };
 }
 async function renderActivity() {
@@ -1644,9 +1757,9 @@ async function renderActivity() {
   const fw = ls.get('studio.actWho', 'all'), fg = ls.get('studio.actGame', 'all');
   const people = [...S.members, WORKER_NAME];
   const chip = (v, label) => `<button type="button" class="chip-btn ${fw === v ? 'on' : ''}" data-who="${esc(v)}">${esc(label)}</button>`;
-  $('#actWho').innerHTML = chip('all', 'Hepsi') + people.map((p) => chip(p, p === WORKER_NAME ? '🤖 Çalışan' : p)).join('') + chip('system', '🛠 Sistem');
+  $('#actWho').innerHTML = chip('all', 'Hepsi') + people.map((p) => chip(p, p === WORKER_NAME ? `🤖 ${WORKER_NAME}` : p)).join('') + chip('system', '🛠 Sistem');
   $('#actGame').innerHTML = `<option value="all">Tüm oyunlar</option>` + [...S.games.values()].map((x) => `<option value="${esc(x.slug)}" ${fg === x.slug ? 'selected' : ''}>${esc(x.title)}</option>`).join('');
-  document.querySelectorAll('#actWho .chip-btn').forEach((b) => b.onclick = () => { ls.set('studio.actWho', b.dataset.who); renderActivity(); });
+  $$('#actWho .chip-btn').forEach((b) => b.onclick = () => { ls.set('studio.actWho', b.dataset.who); renderActivity(); });
   $('#actGame').onchange = (e) => { ls.set('studio.actGame', e.target.value); renderActivity(); };
   const rows = grouped.filter((g) => (fw === 'system' ? g.system : !g.system && (fw === 'all' || g.who === fw)) && (fg === 'all' || g.game === fg)).slice(0, 60);
   box.innerHTML = rows.length ? rows.map((g) => `
@@ -1695,13 +1808,15 @@ async function route() {
 }
 async function boot() {
   try { const t = await readJSON('team.json'); if (t?.data?.members?.length) S.members = t.data.members; } catch {}
+  try { S.login = await S.store.whoami(); } catch { S.login = null; }
+  if (lockedName()) { S.user = lockedName(); ls.set('studio.user', S.user); }
+  else if (S.user === ADMIN.name || (S.user && !S.members.includes(S.user))) { S.user = null; ls.del('studio.user'); }
   await loadWorkerStatus();
   try {
     const c = await readJSON('config/studio.json'); S.config = c?.data || {};
     const a = $('#driveRoot'); if (a && S.config.driveRootUrl) { a.href = S.config.driveRootUrl; a.innerHTML = DRIVE_SVG; a.hidden = false; }
     const y = $('#ytChannel'); if (y && S.config.youtube?.channelUrl) { y.href = S.config.youtube.channelUrl; y.innerHTML = YT_SVG; y.title = `YouTube: ${S.config.youtube.name} (${S.config.youtube.handle})`; y.hidden = false; }
   } catch {}
-  if (S.user && !S.members.includes(S.user)) S.user = null;
   initVolumeControl();
   renderUserSelect();
   await route();
@@ -1714,7 +1829,10 @@ $('#modalClose').onclick = closeModal;
 $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); route(); });
-window.addEventListener('beforeunload', (e) => { if ([...S.pending.values()].some((l) => l.length)) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if ([...S.pending.values()].some((l) => l.length) || S.uploading.size) { e.preventDefault(); e.returnValue = ''; } });
+// Sayfaya yanlışlıkla bırakılan dosya tarayıcıda açılmasın (yükleme alanının dışında)
+window.addEventListener('dragover', (e) => { if (!e.target.closest?.('.dropzone')) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (!e.target.closest?.('.dropzone')) e.preventDefault(); });
 
 (function init() {
   if (MAINTENANCE) {

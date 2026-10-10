@@ -1,8 +1,13 @@
 {
- "v": 46,
- "at": "2026-10-09T16:33:10+00:00",
- "msg": "YouTube kanal bağlantısı (üst bar + ana sayfa), son aşamada yayın linki alanı, kartta Yayında rozeti",
+ "v": 47,
+ "at": "2026-10-10T11:15:35+00:00",
+ "msg": "Yeni çalışma düzeni: 8 aşama; sade metin seçimi; materyal kontrolü (yükleme, link, kataloglar); incelemede materyal değişikliği; Kağan yönetici, oyun silme; çalışan adı Çırak",
  "history": [
+  {
+   "v": 47,
+   "at": "2026-10-10T11:15:35+00:00",
+   "msg": "Yeni çalışma düzeni: 8 aşama; sade metin seçimi; materyal kontrolü (yükleme, link, kataloglar); incelemede materyal değişikliği; Kağan yönetici, oyun silme; çalışan adı Çırak"
+  },
   {
    "v": 46,
    "at": "2026-10-09T16:33:10+00:00",
@@ -97,11 +102,6 @@
    "v": 28,
    "at": "2026-10-07T02:43:58+00:00",
    "msg": "Her meme vuruşu numaralı ayrı kutuda (Vuruş 1/2)"
-  },
-  {
-   "v": 27,
-   "at": "2026-10-07T00:09:34+00:00",
-   "msg": "⏱ kelime seçici; seçilen bölümde diğer seçenekler katlanır; alt barda S1–S9 kısayolları; mobil üst bar taşması düzeltildi"
   }
  ]
 }

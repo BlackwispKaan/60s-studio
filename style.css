@@ -466,3 +466,85 @@ button.at-chip:hover { outline: 1px solid var(--accent); }
 }
 .sel-diff { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px dashed var(--warn); border-radius: 10px; }
 .sel-diff b { color: var(--warn); }
+
+/* ---------- Yeni akış (2026-10-10): 8 aşama, metin seçimi, materyal kontrolü, yükleme, yönetici ---------- */
+.st-script, .st-materials, .st-choosing, .st-collecting { color: var(--accent); }
+.st-queued_research, .st-queued_regen, .st-queued_materials, .st-queued_build, .st-queued_revision { color: var(--info); }
+.st-researching, .st-gathering, .st-drafting, .st-voicing, .st-revising, .st-editing { color: var(--warn); }
+.st-deleting { color: var(--bad); }
+.game-card.deleting { opacity: .5; }
+.pipeline .step .who { font-size: 10px; margin-right: 3px; opacity: .8; }
+@media (max-width: 600px) {
+  .pipeline .step:not(.current) .step-name, .pipeline .step:not(.current) .who { display: none; }
+  .pipeline .step.current { flex: 3; }
+}
+.fixed-line { background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 5px; padding: 0 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.opt .fixed-line { font-weight: 500; opacity: .85; }
+.tr-badge { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .4px; padding: 1px 5px; border-radius: 4px; background: var(--bg); color: var(--muted); margin-right: 6px; vertical-align: 1px; }
+.opt-srcs { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.opt-src { color: var(--info); text-decoration: none; }
+.opt-src:hover { text-decoration: underline; }
+.fixed-card .lock { font-size: 22px; line-height: 1; margin-top: 2px; }
+.stage-guide { margin-bottom: 16px; }
+.stage-guide ol { margin: 10px 0 8px; padding-left: 20px; }
+.stage-guide li { margin: 4px 0; font-size: 14px; }
+.script-list { margin: 10px 0 0; padding: 0; list-style: none; }
+.script-list li { padding: 10px 0; border-top: 1px solid var(--border); }
+.script-list li:first-child { border-top: 0; }
+.script-list .opt-en { font-size: 15px; margin-top: 2px; }
+
+/* Materyal kontrolü */
+.media-sub { padding: 14px 0 4px; border-top: 1px solid var(--border); }
+.media-sub:first-child { border-top: 0; padding-top: 0; }
+.line-quote { margin: 10px 0 4px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 8px; }
+.line-quote .opt-en { font-size: 15.5px; }
+.line-quote .opt-tr { margin-top: 4px; }
+.mblock { margin-top: 14px; }
+.mblock-head { font-weight: 700; font-size: 13.5px; margin-bottom: 8px; }
+.slot, .item { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); margin-bottom: 8px; }
+.slot.missing { display: block; border: 1px dashed var(--warn); background: color-mix(in srgb, var(--warn) 5%, var(--bg)); }
+.slot-media { min-width: 0; }
+.slot-media .cand-media, .slot-video, .slot-media .cand-video { border-radius: 8px; width: 100%; aspect-ratio: 16/9; display: block; background: #000; }
+.slot-audio { width: 100%; margin-top: 8px; }
+.empty-media { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--muted); background: repeating-linear-gradient(135deg, var(--surface-2) 0 10px, var(--surface) 10px 20px); cursor: default; }
+.empty-media span { font-size: 24px; }
+.empty-media small { font-size: 11px; }
+.slot-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.slot-desc { font-weight: 600; }
+.src-line a { color: var(--info); text-decoration: none; }
+.src-line a:hover { text-decoration: underline; }
+.slot-actions { display: flex; gap: 16px; margin-top: 6px; }
+.item-head { line-height: 1.45; }
+.item-opts { margin: 2px 0; gap: 8px; }
+.kind-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+.k-cutaway { background: #4a2a5c; color: #e0a8ff; }
+.k-green { background: #1f4a2a; color: #8fe6a0; }
+.k-sfx { background: #1f3a4a; color: #8fd0e6; }
+.k-gp { background: #5c4a1f; color: #ffd98a; }
+.label-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.label-in { width: 150px; padding: 3px 8px !important; font-size: 12.5px; text-transform: uppercase; }
+.range-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; flex-wrap: wrap; }
+.range-row input { width: 150px; padding: 5px 8px; }
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 18px 12px; border: 2px dashed var(--border); border-radius: 10px; cursor: pointer; text-align: center; background: var(--surface-2); transition: border-color .15s, background .15s; }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.dropzone input { display: none; }
+.dz-icon { font-size: 22px; }
+.replace-box { margin-top: 8px; }
+.replace-box[hidden] { display: none; }
+.link-row { display: flex; gap: 6px; margin-top: 8px; }
+.link-row input { flex: 1; min-width: 0; }
+.upbox { margin-top: 8px; }
+.upbar-track { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+.upbar { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.add-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.warn-pill { color: var(--warn); border-color: var(--warn); }
+.media-card > summary { cursor: pointer; }
+.src-tabs { margin-bottom: 4px; }
+@media (max-width: 640px) { .slot, .item { grid-template-columns: 1fr; } }
+
+/* Yönetici: silme */
+.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn-danger:hover { filter: brightness(1.08); border-color: var(--bad); }
+.danger-zone { margin-top: 6px; padding: 12px 14px; border: 1px solid var(--bad); border-radius: 10px; background: color-mix(in srgb, var(--bad) 6%, transparent); }
+.del-banner { border-color: var(--bad); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+select:disabled { opacity: 1; cursor: default; }
