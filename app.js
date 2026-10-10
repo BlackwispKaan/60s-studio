@@ -459,7 +459,7 @@ function cardSub(g) {
 function stageGuideHtml() {
   return `<details class="card stage-guide" ${ls.get('studio.guideSeen') ? '' : 'open'}><summary><b>🧭 Çalışma düzeni</b> <span class="small muted">· 8 aşama, kim ne yapar</span></summary>
     <ol>${STEPS.map((s) => `<li><b>${s.who === 'w' ? '🤖' : '👥'} ${esc(s.name)}</b>: ${esc(s.tip)}</li>`).join('')}</ol>
-    <p class="small muted" style="margin:0">🤖 = ${WORKER_NAME} çalışır, siz beklersiniz · 👥 = ekip seçer / kontrol eder. Videonun başı hep “<i>[Oyun] in 60 seconds.</i>”, sonu hep “<i>${esc(CLOSING)}</i>”. Oyunu yalnız ${ADMIN.name} silebilir.</p>
+    <p class="small muted" style="margin:0">🤖 = ${WORKER_NAME} çalışır, siz beklersiniz · 👥 = ekip seçer / kontrol eder. Videonun başı hep “<i>[Oyun] in 60 seconds.</i>”, sonu hep “<i>${esc(CLOSING)}</i>”.</p>
   </details>`;
 }
 
@@ -491,6 +491,7 @@ async function renderHome() {
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
       <button class="btn btn-primary" type="submit">+ Yeni oyun</button>
     </form>
+    <section class="card sugg" id="suggBox"><div class="row"><h2>💡 Önerilen oyunlar</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
     ${stageGuideHtml()}
     <section class="card tasks" id="taskList"><div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span><span class="spinner" style="width:16px;height:16px;border-width:2px"></span></div></section>
     <div class="row" style="margin-bottom:12px"><h2>Oyunlar</h2><span class="muted small">${games.length}</span><span class="spacer"></span>
@@ -515,32 +516,166 @@ async function renderHome() {
   $$('[data-edit]').forEach((b) => b.onclick = () => editGameModal(b.dataset.edit));
   const ta = $('#toggleArchive'); if (ta) ta.onclick = () => { S.showArchived = !S.showArchived; renderHome(); };
   const gd = $('.stage-guide'); if (gd) gd.ontoggle = () => { if (!gd.open) ls.set('studio.guideSeen', '1'); };
+  renderSuggestions();
   renderTaskList();
   renderActivity();
 
   $('#newGame').onsubmit = async (e) => {
     e.preventDefault();
     const title = $('#newGameName').value.trim();
-    const slug = slugify(title);
-    if (!slug) return;
-    if (S.games.has(slug)) {
-      if (S.games.get(slug).deleteRequested) return toast('Bu adda bir oyun siliniyor; birkaç dakika sonra tekrar dene.', true);
-      location.hash = `#/game/${slug}`; return;
-    }
+    if (!slugify(title)) return;
     const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Oluşturuluyor…';
     try {
-      const g = {
-        schema: 2, slug, title, owner: S.user, owners: [S.user], createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
-        opening: `${title} in 60 seconds.`, closing: CLOSING,
-        settings: { captions: 'full', mediaFolderUrl: '' }, summary: '', sections: [], versions: [], revisions: [],
-        log: [{ at: nowIso(), by: S.user, msg: 'Oyun eklendi, araştırma kuyruğa alındı.' }],
-      };
-      await S.store.put(`games/${slug}/game.json`, JSON.stringify(g, null, 2) + '\n', `[${S.user}] Yeni oyun: ${title}`);
-      await enqueue('new_game', slug);
-      S.games.set(slug, g);
+      const { slug } = await createGame(title);
       location.hash = `#/game/${slug}`;
     } catch (err) { toast('Oluşturulamadı: ' + err.message, true); btn.disabled = false; btn.textContent = '+ Yeni oyun'; }
   };
+}
+
+/* ---------- Önerilen oyunlar (config/suggestions.json: Çırak'ın havuzu, ana sayfada 10'u görünür) ---------- */
+// Eşleştirme anahtarı (_studio/tools/suggest.py key() ile aynı mantık): "GTA V" = "Grand Theft Auto V" = "gta-5"
+const gameKey = (t) => slugify(String(t || '')).replace('grand-theft-auto', 'gta').replace(/-v$/, '-5')
+  .replace(/-(legacy|enhanced|remastered|definitive-edition|game-of-the-year-edition|goty)$/, '').replace(/-/g, '');
+const startedKeys = () => new Set([...S.games.values()].flatMap((g) => [gameKey(g.title), gameKey(g.slug)]));
+const suggById = (d, id) => (d.pool || []).find((x) => x.id === id);
+const suggGone = (x, started) => !x || x.state === 'picked' || x.state === 'dismissed' || started.has(gameKey(x.title));
+// Yeni gelecek adaylar: hiç gösterilmeyenler (puana göre), sonra daha önce gösterilip seçilmeyenler (en eskisi önce)
+function suggCandidates(d, exclude, started) {
+  const ok = (d.pool || []).filter((x) => !exclude.has(x.id) && !suggGone(x, started));
+  return [...ok.filter((x) => x.state === 'new').sort((a, b) => (b.score || 0) - (a.score || 0)),
+    ...ok.filter((x) => x.state === 'shown').sort((a, b) => String(a.seenAt || '').localeCompare(String(b.seenAt || '')))];
+}
+const suggFresh = (d, started) => (d.pool || []).filter((x) => x.state === 'new' && !(d.view || []).includes(x.id) && !suggGone(x, started)).length;
+async function mutateJSON(path, fn, message) {
+  for (let i = 0; i < 4; i++) {
+    const cur = await readJSON(path);
+    const data = cur?.data || {};
+    fn(data);
+    try { await S.store.put(path, JSON.stringify(data, null, 2) + '\n', `[${S.user}] ${message}`, cur?.sha); return data; }
+    catch (e) { if (e.status === 409 || e.status === 422) continue; throw e; }
+  }
+  throw new Error('Kaydedilemedi (çakışma). Sayfayı yenileyin.');
+}
+// Havuzda gösterilmemiş öneri azaldıysa Çırak'a yeni araştırma işi (kuyrukta zaten varsa tekrar açılmaz)
+async function ensureSuggestJob(d, started) {
+  if (suggFresh(d, started) >= 10) return false;
+  try { if ((await S.store.list('queue')).some((f) => f.name.includes('-suggest-'))) return false; } catch {}
+  await enqueue('suggest', '_suggest', { reason: 'havuz azaldı' });
+  return true;
+}
+function suggCardHtml(x, started) {
+  const gs = x.gameSlug || [...S.games.values()].find((g) => gameKey(g.title) === gameKey(x.title))?.slug;
+  const done = started || x.state === 'picked';
+  return `<div class="sugg-card ${done ? 'started' : ''}" data-sugg="${esc(x.id)}">
+    <div class="sugg-img">${x.image ? `<img src="${esc(x.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span>${esc(x.title)}</span>`}
+      <span class="sugg-score" title="İlgi + materyal bolluğu + espri potansiyeli (0–100)">🔥 ${esc(x.score ?? '?')}</span></div>
+    <div class="sugg-body">
+      <h3 lang="en">${esc(x.title)}</h3>
+      <div class="small muted">${esc([x.genre, x.year, x.platforms].filter(Boolean).join(' · '))}</div>
+      <p class="small sugg-why">${esc(x.why || '')}</p>
+      ${x.angle ? `<p class="small sugg-line"><b>😂 Espri:</b> ${esc(x.angle)}</p>` : ''}
+      ${x.material ? `<p class="small sugg-line muted"><b>🎞 Materyal:</b> ${esc(x.material)}</p>` : ''}
+      ${(x.signals || []).length ? `<div class="sugg-signals">${x.signals.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+    </div>
+    <div class="sugg-actions">
+      ${done ? `<a class="btn small" href="#/game/${esc(gs || '')}">✓ Başladı · aç →</a>`
+        : `<button type="button" class="btn btn-primary small" data-sugg-start="${esc(x.id)}">▶ Başla</button>
+           <button type="button" class="btn btn-ghost small" data-sugg-hide="${esc(x.id)}" title="Bu öneriyi gizle, yerine yenisi gelsin">Gizle</button>`}
+      <span class="spacer"></span>${(x.links || []).map((l) => `<a class="small" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('')}
+    </div>
+  </div>`;
+}
+async function renderSuggestions() {
+  const box = $('#suggBox'); if (!box) return;
+  let d;
+  try { d = (await readJSON('config/suggestions.json'))?.data || { pool: [], view: [] }; } catch { box.innerHTML = '<p class="small muted">Öneriler yüklenemedi.</p>'; return; }
+  S.sugg = d;
+  const started = startedKeys();
+  const list = (d.view || []).map((id) => suggById(d, id)).filter((x) => x && x.state !== 'dismissed');
+  const fresh = suggFresh(d, started);
+  let queued = false;
+  try { queued = (await S.store.list('queue')).some((f) => f.name.includes('-suggest-')); } catch {}
+  const open = ls.get('studio.suggOpen', '1') === '1';
+  box.innerHTML = `<div class="row sugg-head">
+      <button type="button" class="link-btn sugg-toggle" id="suggToggle" aria-expanded="${open}"><h2>💡 Önerilen oyunlar ${open ? '▾' : '▸'}</h2></button>
+      <span class="small muted">Daha önce yapmadığımız, ilgi çekecek ve materyali bol oyunlar</span><span class="spacer"></span>
+      <span class="small muted" title="Havuzda henüz gösterilmemiş öneri sayısı">${queued ? `<span class="spinner" style="width:12px;height:12px;border-width:2px"></span> ${WORKER_NAME} yeni öneri arıyor · ` : ''}havuzda ${fresh} yeni${d.updatedAt ? ` · ${fmtDate(d.updatedAt)}` : ''}</span>
+      <button type="button" class="btn small" id="suggRefresh" title="Başladığınız ve gizlediğiniz oyunlar çıkar, yerine yenileri gelir. Hiçbirini seçmediyseniz listenin tamamı yenilenir.">🔄 Yenile</button>
+    </div>
+    <div class="sugg-grid" ${open ? '' : 'hidden'}>${list.length ? list.map((x) => suggCardHtml(x, started.has(gameKey(x.title)))).join('')
+      : `<p class="small muted">${queued ? `${WORKER_NAME} öneri havuzunu hazırlıyor; birkaç dakika sonra burada.` : `Henüz öneri yok. 🔄 Yenile'ye basınca ${WORKER_NAME} araştırmaya başlar.`}</p>`}</div>`;
+  $('#suggToggle').onclick = () => { ls.set('studio.suggOpen', open ? '0' : '1'); renderSuggestions(); };
+  $$('[data-sugg-start]').forEach((b) => b.onclick = async () => {
+    const x = suggById(S.sugg, b.dataset.suggStart);
+    if (!x || !confirm(`“${x.title}” başlasın mı? ${WORKER_NAME} araştırmaya başlar.`)) return;
+    b.disabled = true; b.textContent = 'Başlatılıyor…';
+    try {
+      const { slug } = await createGame(x.title);
+      await mutateJSON('config/suggestions.json', (dd) => {
+        const y = suggById(dd, x.id); if (y) Object.assign(y, { state: 'picked', pickedBy: S.user, pickedAt: nowIso(), gameSlug: slug });
+      }, `öneriler: ${x.title} başlatıldı`);
+      toast(`${x.title} başladı ✓ · ${WORKER_NAME} araştırıyor`);
+      renderSuggestions(); renderTaskList();
+    } catch (e) { toast('Başlatılamadı: ' + e.message, true); b.disabled = false; b.textContent = '▶ Başla'; }
+  });
+  $$('[data-sugg-hide]').forEach((b) => b.onclick = async () => {
+    const id = b.dataset.suggHide; b.disabled = true;
+    try {
+      const dd = await mutateJSON('config/suggestions.json', (dd) => {
+        const y = suggById(dd, id); if (y) Object.assign(y, { state: 'dismissed', dismissedBy: S.user, dismissedAt: nowIso() });
+        const view = (dd.view || []).filter((v) => v !== id);
+        const next = suggCandidates(dd, new Set(view), startedKeys())[0];
+        if (next) view.push(next.id);
+        dd.view = view;
+      }, `öneriler: ${suggById(S.sugg, id)?.title || id} gizlendi`);
+      await ensureSuggestJob(dd, startedKeys());
+      renderSuggestions();
+    } catch (e) { toast('Olmadı: ' + e.message, true); b.disabled = false; }
+  });
+  $('#suggRefresh').onclick = async () => {
+    const btn = $('#suggRefresh'); btn.disabled = true; btn.textContent = 'Yenileniyor…';
+    try {
+      let msg = '';
+      const dd = await mutateJSON('config/suggestions.json', (dd) => {
+        const st = startedKeys(), now = nowIso();
+        dd.pool = dd.pool || [];
+        // Başlanan oyunlar (öneriden ya da elle açılmış) "picked" olur, bir daha önerilmez
+        dd.pool.forEach((y) => { if (y.state !== 'picked' && st.has(gameKey(y.title))) Object.assign(y, { state: 'picked', gameSlug: y.gameSlug || slugify(y.title) }); });
+        const cur = (dd.view || []).map((id) => suggById(dd, id)).filter(Boolean);
+        const gone = cur.filter((y) => suggGone(y, st));
+        let keep = cur.filter((y) => !suggGone(y, st));
+        if (!gone.length) { keep.forEach((y) => { y.state = 'shown'; y.seenAt = now; }); keep = []; }
+        const view = keep.map((y) => y.id);
+        const exclude = new Set([...view, ...(gone.length ? [] : cur.map((y) => y.id))]);
+        for (const y of suggCandidates(dd, exclude, st)) { if (view.length >= 10) break; view.push(y.id); }
+        for (const y of cur) { if (view.length >= 10) break; if (!view.includes(y.id) && !suggGone(y, st)) view.push(y.id); }
+        msg = gone.length ? `${gone.length} öneri çıktı, yerine yenileri geldi` : 'Liste yenilendi';
+        dd.view = view;
+      }, 'öneriler yenilendi');
+      const asked = await ensureSuggestJob(dd, startedKeys());
+      toast(`${msg} ✓${asked ? ` · ${WORKER_NAME} yeni öneriler araştıracak` : ''}`);
+      renderSuggestions(); renderTaskList();
+    } catch (e) { toast('Yenilenemedi: ' + e.message, true); btn.disabled = false; btn.textContent = '🔄 Yenile'; }
+  };
+}
+// Yeni oyun aç (form + öneri kartı): game.json + araştırma işi
+async function createGame(title) {
+  const slug = slugify(title);
+  if (!slug) throw new Error('Geçersiz oyun adı');
+  if (S.games.has(slug)) {
+    if (S.games.get(slug).deleteRequested) throw new Error('Bu adda bir oyun siliniyor; birkaç dakika sonra tekrar dene.');
+    return { slug, existed: true };
+  }
+  const g = {
+    schema: 2, slug, title, owner: S.user, owners: [S.user], createdBy: S.user, createdAt: nowIso(), status: 'queued_research',
+    opening: `${title} in 60 seconds.`, closing: CLOSING,
+    settings: { captions: 'full', mediaFolderUrl: '' }, summary: '', sections: [], versions: [], revisions: [],
+    log: [{ at: nowIso(), by: S.user, msg: 'Oyun eklendi, araştırma kuyruğa alındı.' }],
+  };
+  await S.store.put(`games/${slug}/game.json`, JSON.stringify(g, null, 2) + '\n', `[${S.user}] Yeni oyun: ${title}`);
+  await enqueue('new_game', slug);
+  S.games.set(slug, g);
+  return { slug, existed: false };
 }
 
 const owners = (g) => (g.owners?.length ? g.owners : g.owner ? [g.owner] : []);
@@ -596,7 +731,7 @@ function editGameModal(slug) {
       <div class="field"><label for="egDrive">Drive klasör linki</label><input type="url" id="egDrive" value="${esc(g.settings?.mediaFolderUrl || '')}" placeholder="https://drive.google.com/drive/folders/…"></div>
       <label class="chip"><input type="checkbox" id="egArchived" ${g.archived ? 'checked' : ''}> Arşivle (ana sayfada gizlenir)</label>
       <div class="row"><button class="btn btn-primary" id="egSave">Kaydet</button><button class="btn btn-ghost" id="egCancel">Vazgeç</button></div>
-      ${isAdmin() ? `<div class="danger-zone"><div class="row"><b>🗑 Oyunu sil</b><span class="small muted">· sadece ${ADMIN.name} görür</span></div>
+      ${isAdmin() ? `<div class="danger-zone"><div class="row"><b>🗑 Oyunu sil</b></div>
         <p class="small muted" style="margin:6px 0 10px">Oyun siteden ve repodan kalkar (git geçmişinde durur). Drive klasörü Google Drive çöp kutusuna gider, 30 gün içinde geri alınabilir.</p>
         <button class="btn btn-danger small" id="egDelete" ${g.deleteRequested ? 'disabled' : ''}>${g.deleteRequested ? 'Silme sırada' : 'Oyunu sil…'}</button></div>` : ''}
     </div>`);
@@ -620,7 +755,7 @@ function editGameModal(slug) {
 }
 // Silme: yalnız yönetici. İş kuyruğa Kağan'ın token'ıyla yazılır; worker (admin_jobs.py) commit yazarını doğrular.
 function deleteGameModal(slug) {
-  if (!isAdmin()) return toast(`Oyunları yalnız ${ADMIN.name} silebilir.`, true);
+  if (!isAdmin()) return;
   const g = S.games.get(slug);
   openModal(`<h2>🗑 ${esc(g.title)} silinsin mi?</h2>
     <p class="small">Oyun siteden ve repodan kaldırılır (git geçmişinde kalır), bekleyen işleri iptal edilir. Drive klasörü Google Drive çöp kutusuna gider, 30 gün içinde geri alınabilir. ${WORKER_NAME} birkaç dakika içinde siler.</p>
@@ -1626,12 +1761,12 @@ async function renderIntegrations() {
 
 /* ---------- worker durumu (Kağan'ın PC'sindeki arka plan Claude) ---------- */
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
-const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', materials: 'materyal toplama', build: 'kurgu + ses', revise: 'düzeltme',
+const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', materials: 'materyal toplama', build: 'kurgu + ses', revise: 'düzeltme', suggest: 'yeni oyun önerileri',
   delete_game: `silme (${ADMIN.name})`, refresh_media: 'meme adaylarını yenileme' };
 function jobName(j) {
   const m = /^\d{8}T\d{6}-([a-z_]+)-(.+)$/.exec(j || '');
   if (!m) return j || '';
-  return `${S.games.get(m[2])?.title || m[2]}: ${JOB_LABEL[m[1]] || m[1]}`;
+  return `${m[2] === '_suggest' ? 'Öneri havuzu' : S.games.get(m[2])?.title || m[2]}: ${JOB_LABEL[m[1]] || m[1]}`;
 }
 function workerView(w0) {
   if (!w0) return null;
@@ -1676,13 +1811,13 @@ async function renderTaskList() {
   const v = workerView(w);
   const line = (j, i) => {
     const isRun = j.name === running;
-    const title = S.games.get(j.slug)?.title || j.slug;
+    const title = j.slug === '_suggest' ? 'Öneri havuzu' : S.games.get(j.slug)?.title || j.slug;
     const extra = j.type === 'regenerate' && j.payload?.sections ? ` (${j.payload.all ? 'tüm metin' : j.payload.sections.length + ' bölüm'})` : '';
     return `<div class="task ${isRun ? 'run' : ''}">
       <span class="task-n">${isRun ? (w.state === 'limited' ? '⏸' : '▶') : i + 1}</span>
       <div style="flex:1;min-width:0"><b>${esc(title)}</b>: ${esc(JOB_LABEL[j.type] || j.type)}${esc(extra)}
         <div class="small muted">${esc(j.by || '?')} istedi · ${isRun ? (w.state === 'limited' ? 'limit nedeniyle yarım kaldı' : `çalışıyor (${sinceText(w.at)})`) : `sırada (${sinceText(j.at)})`}</div></div>
-      <a class="small" href="#/game/${encodeURIComponent(j.slug)}">aç →</a>
+      <a class="small" href="${j.slug === '_suggest' ? '#/' : `#/game/${encodeURIComponent(j.slug)}`}">aç →</a>
     </div>`;
   };
   const state = v ? `<span class="worker-pill ${v.cls}" title="${esc(v.long)}">${esc(v.short)}</span>` : '';
