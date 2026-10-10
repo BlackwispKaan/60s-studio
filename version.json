@@ -1,8 +1,13 @@
 {
- "v": 52,
- "at": "2026-10-10T15:52:48+00:00",
- "msg": "Önerilen oyunlar başlığı sola hizalandı",
+ "v": 53,
+ "at": "2026-10-10T16:17:23+00:00",
+ "msg": "Kontrol: Çırak'a geri bildirim + yeniden topla (genel not, bölüm notu, öğe başına Yenisini bul), Çırak'ın yanıtları; kaynakta video başlığı",
  "history": [
+  {
+   "v": 53,
+   "at": "2026-10-10T16:17:23+00:00",
+   "msg": "Kontrol: Çırak'a geri bildirim + yeniden topla (genel not, bölüm notu, öğe başına Yenisini bul), Çırak'ın yanıtları; kaynakta video başlığı"
+  },
   {
    "v": 52,
    "at": "2026-10-10T15:52:48+00:00",
@@ -97,11 +102,6 @@
    "v": 34,
    "at": "2026-10-07T03:55:05+00:00",
    "msg": "Materyal aşamasından Seçime geri dönüş (düğme + aşama çubuğu); S1'de tekrar eden açılış kutusu kaldırıldı"
-  },
-  {
-   "v": 33,
-   "at": "2026-10-07T03:53:25+00:00",
-   "msg": "Bölüm tasarımı sadeleşti: opsiyonel/teknik/değişti notları kaldırıldı, meme blokları tam genişlik, not kutusu katlanır"
   }
  ]
 }

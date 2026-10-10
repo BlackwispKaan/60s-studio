@@ -579,3 +579,9 @@ select:disabled { opacity: 1; cursor: default; }
 
 /* "Ben:" GitHub hesabına kilitliyse açılır liste görünümü (ok) yok */
 .who select.locked { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: none; cursor: default; padding-right: 10px; }
+
+/* Kontrol: geri bildirim ve yeniden toplama */
+.feedback-box { margin-top: 14px; padding: 12px 14px; border: 1px dashed var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.feedback-box .note-input { margin-top: 8px; }
+.redo-note { font-size: 12.5px; color: var(--warn); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.sec-reply { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--info); background: var(--surface-2); border-radius: 6px; }

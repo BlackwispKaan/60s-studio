@@ -876,6 +876,26 @@ function dropzoneHtml(key, kind, text) {
 function linkRowHtml(key, ph) {
   return `<div class="link-row"><input type="url" data-link="${esc(key)}" placeholder="${esc(ph || 'veya link yapıştır (YouTube, TikTok, X, Reddit…)')}"><button type="button" class="btn small" data-link-save="${esc(key)}">Ekle</button></div>`;
 }
+// Kontrol aşamasında geri bildirim → "Yeniden topla" (Kağan 2026-10-10: Deadlock'ta alıştırma modu görüntüleri)
+// mediaFeedback {general, all} + bölüm media.note / media.regather + öğe redo {reason} → materials işi (payload.regather)
+const inControl = (g) => stOf(g) === 'materials';
+function regatherCount(g) {
+  if (g.mediaFeedback?.all) return g.sections.length;
+  return g.sections.reduce((n, s) => { const m = s.media || {}; return n + (m.regather ? 1 : [...(m.gameplay || []), ...(m.items || [])].filter((x) => x.redo).length); }, 0);
+}
+const regatherPending = (g) => regatherCount(g) > 0 || !!(g.mediaFeedback?.general || '').trim();
+function redoHtml(x, key) {
+  return x.redo ? `<div class="redo-note">🔄 Yenisi istenecek${x.redo.reason ? `: “${esc(x.redo.reason)}”` : ''} <span class="muted">· ${esc(x.redo.by || '')}</span>
+    <button type="button" class="link-btn small" data-redo-undo="${esc(key)}">geri al</button></div>` : '';
+}
+const lastRegather = (g) => (g.regathers || []).slice(-1)[0];
+function regatherLabel(g, r) {
+  if (!r) return '';
+  if (r.all) return 'tüm bölümler';
+  const secs = (r.sections || []).map((sid) => 'S' + (secIdx(g, sid) + 1));
+  const ents = (r.entries || []).filter((e) => !(r.sections || []).includes(e.sid));
+  return [secs.join(', '), ents.length ? `${ents.length} öğe` : ''].filter(Boolean).join(' + ');
+}
 function gpSlotHtml(g, sec, x, ed) {
   const key = `${sec.id}|${x.id}`;
   const up = uploadBoxHtml(key);
@@ -897,7 +917,8 @@ function gpSlotHtml(g, sec, x, ed) {
       ${x.review ? `<div class="need-why">🤖 ${esc(x.review)}</div>` : ''}
       ${x.src.error ? `<div class="need-warn">⚠️ ${esc(x.src.error)}</div>` : ''}
       ${rangeIn}${up}
-      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button></div>
+      ${redoHtml(x, key)}
+      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button>${inControl(g) && !x.redo ? `<button type="button" class="link-btn small" data-redo="${esc(key)}" title="${WORKER_NAME} bu görüntünün yerine yenisini bulsun (sebebini yaz)">🔄 Yenisini bul</button>` : ''}</div>
         <div class="replace-box" data-replace-box="${esc(key)}" hidden>${dropzoneHtml(key, 'gp', 'Yeni kayıt: sürükle bırak ya da tıkla seç')}${linkRowHtml(key)}</div>` : ''}
     </div>
   </div>`;
@@ -918,8 +939,8 @@ function itemHtml(g, sec, x, ed) {
       </div>
       <div class="small muted src-line">${srcLabelHtml(x.src)}${x.by && x.by !== WORKER_NAME ? ` · ${esc(x.by)} ekledi` : ''}</div>
       ${x.src?.error ? `<div class="need-warn">⚠️ ${esc(x.src.error)}</div>` : ''}
-      ${up}
-      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button></div>` : ''}
+      ${up}${redoHtml(x, key)}
+      ${ed && !up ? `<div class="slot-actions"><button type="button" class="link-btn small" data-replace="${esc(key)}">↻ Değiştir</button><button type="button" class="link-btn small" data-remove="${esc(key)}">Kaldır</button>${inControl(g) && !x.redo ? `<button type="button" class="link-btn small" data-redo="${esc(key)}" title="${WORKER_NAME} bunun yerine yenisini bulsun (sebebini yaz)">🔄 Yenisini bul</button>` : ''}</div>` : ''}
     </div>
   </div>`;
 }
@@ -930,12 +951,17 @@ function mediaSectionHtml(g, sec, i, ed, sub = false) {
   return `<section class="${sub ? 'media-sub' : 'card'} media-sec" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-num">S${i + 1}</span><h2>${esc(sec.title)}</h2>${miss ? '<span class="pill warn-pill">görüntü eksik</span>' : ''}</div>
     ${o ? `<div class="line-quote"><div class="opt-en" lang="en">“${narrHtml(o.narration, g)}”</div><div class="opt-tr small">${esc(o.tr)}</div></div>` : ''}
+    ${m.reply ? `<div class="need-why sec-reply">🤖 <b>${WORKER_NAME}:</b> ${esc(m.reply)}</div>` : ''}
     <div class="mblock"><div class="mblock-head">🎮 Oyun görüntüsü</div>
       ${(m.gameplay || []).map((x) => gpSlotHtml(g, sec, x, ed)).join('') || `<p class="small muted">Henüz görüntü yok.</p>`}
       ${ed ? `<button type="button" class="link-btn small" data-add-gp="${esc(sec.id)}">+ Başka görüntü ekle</button>` : ''}</div>
     <div class="mblock"><div class="mblock-head">😂 Memeler ve ses efektleri</div>
       ${(m.items || []).map((x) => itemHtml(g, sec, x, ed)).join('') || '<p class="small muted">Bu bölümde meme yok: oyun görüntüsü + altyazı.</p>'}
       ${ed ? `<div class="add-row">${['cutaway', 'green', 'sfx'].map((k) => `<button type="button" class="btn small" data-add-item="${esc(sec.id)}|${k}" title="${esc(KIND[k].hint)}">+ ${KIND[k].icon} ${KIND[k].label}</button>`).join('')}</div>` : ''}</div>
+    ${ed && inControl(g) ? `<details class="sec-tools" ${m.note || m.regather ? 'open' : ''}><summary class="small muted">✏️ Bu bölümün materyali için not / yeniden topla</summary>
+      <textarea class="note-input" data-mnote="${esc(sec.id)}" rows="2" placeholder="ör. Kapıcı'nın kapısını alıştırmada değil gerçek bir çatışmada göster">${esc(m.note || '')}</textarea>
+      <div class="row" style="margin-top:8px"><button type="button" class="btn small ${m.regather ? 'btn-primary' : 'btn-ghost'}" data-mregather="${esc(sec.id)}">${m.regather ? '🔄 Yeniden toplanacak ✓' : '🔄 Bu bölümü yeniden topla'}</button>
+        <span class="small muted">${m.regather ? `Alttan <b>Yeniden topla</b>'ya bas.` : `İşaretlersen ${WORKER_NAME} bu bölümün görüntülerini ve memelerini notuna göre baştan arar.`}</span></div></details>` : ''}
   </section>`;
 }
 function mediaHeadHtml(g) {
@@ -943,6 +969,13 @@ function mediaHeadHtml(g) {
     <div class="row"><h2>📦 Materyal kontrolü</h2><span class="spacer"></span>${driveLink(g)}<button type="button" class="btn btn-ghost small" id="backToScript">← Metne dön</button></div>
     <p class="small muted" style="margin:10px 0">${WORKER_NAME} her bölüm için oyun görüntüsü, ara klip, green screen ve ses efekti seçti. Önizlemeye tıkla; beğenmediğini <b>↻ Değiştir</b> ya da <b>Kaldır</b>, kataloglardan / linkten / dosyadan yenisini ekle. Görüntü bulunamayan bölümde yükleme alanı var: kaydı sürükle bırak, sonra hangi saniyeler arası kullanılacağını yaz. ${WORKER_NAME} kurguda hepsine bakıp değerlendirir.</p>
     <div class="row small" id="mediaCounts">${mediaCountsHtml(g)}</div>
+    ${(() => { const r = lastRegather(g); return r?.reply ? `<div class="need-why sec-reply" style="margin-top:10px">🤖 <b>${WORKER_NAME} (yeniden toplama, ${esc(regatherLabel(g, r))}):</b> ${esc(r.reply)}</div>` : ''; })()}
+    <div class="feedback-box">
+      <div class="row"><b>🔁 ${WORKER_NAME}'a geri bildirim</b><span class="small muted">· beğenmediğini yaz, yeniden toplasın</span></div>
+      <textarea id="mediaGeneral" class="note-input" rows="3" placeholder="ör. Alıştırma modundan / ana menüden görüntü kullanma. Gerçek maçta yetenek kullanımı göster: Seven'ın ultisi, Doorman'ın kapısı…">${esc(g.mediaFeedback?.general || '')}</textarea>
+      <div class="row" style="margin-top:8px"><label class="chip small"><input type="checkbox" id="mediaAll" ${g.mediaFeedback?.all ? 'checked' : ''}> Tüm bölümleri yeniden topla</label>
+        <span class="small muted">Tek görüntü için kartındaki <b>🔄 Yenisini bul</b>, bir bölüm için bölümün altındaki <b>✏️ not / yeniden topla</b>; sonra alttan <b>🔄 Yeniden topla</b>.</span></div>
+    </div>
     <div class="row" style="margin-top:12px"><span class="small" style="font-weight:600">Altyazı</span>
       <div class="seg" id="capSeg">${CAPTIONS.map((x) => `<button type="button" data-cap="${x.v}" class="${g.settings.captions === x.v ? 'on' : ''}" title="${esc(x.hint)}">${x.label}</button>`).join('')}</div></div>
   </section>`;
@@ -1200,6 +1233,7 @@ function updateCounts(slug) {
   if (st === 'materials') {
     const c = $('#mediaCounts'); if (c) c.innerHTML = mediaCountsHtml(g);
     const b = $('#buildBtn'); if (b) b.disabled = S.uploading.size > 0;
+    const r = $('#regatherBtn'); if (r) { const n = regatherCount(g); r.hidden = !regatherPending(g); r.textContent = `🔄 Yeniden topla${n ? ` (${n})` : ''}`; }
   }
   if (st === 'script') updateScriptFooter(g);
 }
@@ -1455,8 +1489,10 @@ async function renderGame(slug) {
     </div></div>`;
   }
   if (['queued_materials', 'gathering'].includes(st)) {
-    body += `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${st === 'gathering' ? `${WORKER_NAME} materyal topluyor…` : `${WORKER_NAME} materyal toplayacak`}</h2>
-      <p class="muted">Her bölüm için oyun görüntüsü (önce resmi fragmanlar ve oynanış videoları), ara klip, green screen meme ve ses efekti arıyor. Bulamadığı görüntü için size yükleme alanı açacak.</p></div>` + scriptSummaryHtml(g, true);
+    const rg = lastRegather(g), again = rg && rg.status !== 'done';
+    body += `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${again ? `${WORKER_NAME} materyali yeniden ${st === 'gathering' ? 'topluyor…' : 'toplayacak'}` : st === 'gathering' ? `${WORKER_NAME} materyal topluyor…` : `${WORKER_NAME} materyal toplayacak`}</h2>
+      <p class="muted">${again ? `Yeniden toplanan: <b>${esc(regatherLabel(g, rg))}</b>.${rg.general ? ` Notunuz: “${esc(rg.general)}”` : ''} Diğer bölümler olduğu gibi kalır.`
+        : 'Her bölüm için oyun görüntüsü (önce resmi fragmanlar ve oynanış videoları), ara klip, green screen meme ve ses efekti arıyor. Bulamadığı görüntü için size yükleme alanı açacak.'}</p></div>` + scriptSummaryHtml(g, true);
   }
   if (st === 'materials') {
     body += mediaHeadHtml(g) + secs.map((x, i) => mediaSectionHtml(g, x, i, true)).join('');
@@ -1465,6 +1501,7 @@ async function renderGame(slug) {
       <span class="stat"><b>${secs.length - miss}/${secs.length}</b> <span class="small muted">bölümde görüntü</span></span>
       <span class="sec-nav">${secs.map((x, i) => `<button type="button" class="sec-dot ${(x.media?.gameplay || []).some((y) => y.src) ? 'done' : ''}" data-go="${esc(x.id)}" title="S${i + 1} · ${esc(x.title)}">${i + 1}</button>`).join('')}</span>
       <span class="spacer"></span>
+      <button class="btn" id="regatherBtn" ${regatherPending(g) ? '' : 'hidden'} title="${WORKER_NAME} işaretlediğiniz bölüm ve görüntüleri notlarınıza göre yeniden arar">🔄 Yeniden topla${regatherCount(g) ? ` (${regatherCount(g)})` : ''}</button>
       <button class="btn btn-primary" id="buildBtn" ${S.uploading.size ? 'disabled' : ''} title="${WORKER_NAME} ilk deneme videosunu kurar, sonra sesi ekler">▶ Kurguya başla</button>
     </div></div>`;
   }
@@ -1529,6 +1566,7 @@ function bindGame(slug) {
   if (st === 'script') bindScript(slug);
   if (st === 'materials') {
     bindMediaEditors(slug, true);
+    bindRegather(slug);
     const back = $('#backToScript');
     if (back) back.onclick = async () => {
       if (!confirm('Metin aşamasına dönülsün mü? Materyaller korunur; metnini değiştirdiğin bölümlere ' + WORKER_NAME + ' yeniden bakar.')) return;
@@ -1541,6 +1579,7 @@ function bindGame(slug) {
       if (S.uploading.size) return toast('Yükleme bitmesini bekle', true);
       await flush(slug);
       const g = cur(), miss = missingSecs(g);
+      if (regatherPending(g) && !confirm('Yeniden toplama için yazdığınız not / işaretler var ama henüz gönderilmedi. Bunları yok sayıp kurguya geçilsin mi?\n(Göndermek için Vazgeç → 🔄 Yeniden topla)')) return;
       const msg = miss.length ? `${miss.length} bölümde oyun görüntüsü yok (${miss.map((s) => 'S' + (secIdx(g, s.id) + 1)).join(', ')}). ${WORKER_NAME} bulabilirse tamamlar, bulamazsa o bölümde elindeki en yakın görüntüyü kullanır.\nYine de kurguya başlansın mı?`
         : `${WORKER_NAME} ilk deneme videosunu kuracak, sonra anlatıcı sesini ekleyecek. Başlansın mı?`;
       if (!confirm(msg)) return;
@@ -1557,6 +1596,69 @@ function bindGame(slug) {
     const mc = $('#mediaCard'); if (mc) mc.ontoggle = () => { S.mediaOpen[slug] = mc.open; };
     bindReview(slug);
   }
+}
+
+function bindRegather(slug) {
+  const g = () => S.games.get(slug);
+  const no = (sid) => secIdx(g(), sid) + 1;
+  const gen = $('#mediaGeneral');
+  if (gen) gen.onchange = () => { const v = gen.value.trim(); queueOp(slug, (x) => { x.mediaFeedback = { ...(x.mediaFeedback || {}), general: v }; }, 'materyal geri bildirimi'); };
+  if (gen) gen.oninput = () => { const r = $('#regatherBtn'); if (r && gen.value.trim()) r.hidden = false; };
+  const all = $('#mediaAll');
+  if (all) all.onchange = () => { const v = all.checked; queueOp(slug, (x) => { x.mediaFeedback = { ...(x.mediaFeedback || {}), all: v }; }, `tüm bölümler yeniden: ${v ? 'evet' : 'hayır'}`); };
+  $$('[data-mnote]').forEach((ta) => ta.onchange = () => {
+    const sid = ta.dataset.mnote, v = ta.value.trim();
+    queueOp(slug, (x) => { mediaOf(x.sections.find((s) => s.id === sid)).note = v; }, `S${no(sid)} materyal notu`);
+  });
+  $$('[data-mregather]').forEach((b) => b.onclick = () => {
+    const sid = b.dataset.mregather, m = mediaOf(g().sections.find((s) => s.id === sid)), v = !m.regather;
+    const ta = document.querySelector(`[data-mnote="${CSS.escape(sid)}"]`), note = ta ? ta.value.trim() : m.note || '';
+    queueOp(slug, (x) => { const mm = mediaOf(x.sections.find((s) => s.id === sid)); mm.regather = v; mm.note = note; }, `S${no(sid)} yeniden topla: ${v ? 'evet' : 'hayır'}`);
+    renderKeep(slug);
+  });
+  $$('[data-redo]').forEach((b) => b.onclick = () => {
+    const [sid, eid] = b.dataset.redo.split('|');
+    const reason = prompt('Bunun yerine nasıl bir şey olsun? (ör. "alıştırma modu, gerçek maçta ulti göster")', '');
+    if (reason === null) return;
+    const who = S.user;
+    queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (e) e.redo = { by: who, at: nowIso(), reason: reason.trim() }; }, `S${no(sid)} yenisi istendi`);
+    renderKeep(slug);
+  });
+  $$('[data-redo-undo]').forEach((b) => b.onclick = () => {
+    const [sid, eid] = b.dataset.redoUndo.split('|');
+    queueOp(slug, (x) => { const e = findEntry(x, sid, eid); if (e) delete e.redo; }, `S${no(sid)} yenisi isteği geri alındı`);
+    renderKeep(slug);
+  });
+  const rb = $('#regatherBtn');
+  if (rb) rb.onclick = async () => {
+    if (S.uploading.size) return toast('Yükleme bitmesini bekle', true);
+    const gv = $('#mediaGeneral');
+    if (gv && gv.value.trim() !== (g().mediaFeedback?.general || '')) { const v = gv.value.trim(); queueOp(slug, (x) => { x.mediaFeedback = { ...(x.mediaFeedback || {}), general: v }; }, 'materyal geri bildirimi'); }
+    await flush(slug);
+    let x = g(), n = regatherCount(x);
+    const general = (x.mediaFeedback?.general || '').trim();
+    if (!n && !general) return toast('Önce ne değişsin yaz ya da bir bölüm / görüntü işaretle', true);
+    let all = !!x.mediaFeedback?.all;
+    if (!n) {  // sadece genel not var: hepsine mi uygulansın?
+      if (!confirm(`Hiçbir bölüm ya da görüntü işaretlenmedi. Genel notuna göre TÜM bölümlerin materyali yeniden toplansın mı?\n\n“${general}”`)) return;
+      all = true;
+    }
+    const secs = x.sections.filter((s) => s.media?.regather).map((s) => s.id);
+    const entries = x.sections.flatMap((s) => [...(s.media?.gameplay || []), ...(s.media?.items || [])].filter((e) => e.redo).map((e) => ({ sid: s.id, eid: e.id, reason: e.redo.reason || '' })));
+    const what = all ? 'tüm bölümler' : regatherLabel(x, { sections: secs, entries });
+    if (n && !confirm(`${WORKER_NAME} şunları yeniden toplayacak: ${what}.${general ? `\nGenel not: “${general}”` : ''}\nDiğerleri olduğu gibi kalır. Gönderilsin mi?`)) return;
+    rb.disabled = true;
+    const id = 'mg' + Date.now().toString(36);
+    try {
+      await mutateGame(slug, (y) => {
+        (y.regathers = y.regathers || []).push({ id, at: nowIso(), by: S.user, general, all, sections: all ? y.sections.map((s) => s.id) : secs, entries, status: 'queued' });
+        y.status = 'queued_materials';
+        logLine(y, `Materyal yeniden toplama istendi: ${what}${general ? ` — “${general}”` : ''}`);
+      }, 'materyal yeniden toplama istendi');
+      await enqueue('materials', slug, { regather: id });
+      toast('Kuyruğa alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Gönderilemedi: ' + e.message, true); rb.disabled = false; }
+  };
 }
 
 function bindScript(slug) {
