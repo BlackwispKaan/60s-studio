@@ -356,15 +356,15 @@ function renderUserSelect() {
   const fixed = lockedName();
   if (fixed) {
     sel.innerHTML = `<option selected>${esc(fixed)}${fixed === ADMIN.name ? ' 👑' : ''}</option>`;
-    sel.disabled = true;
-    sel.title = `GitHub hesabın: ${S.login}${isAdmin() ? ' · yönetici' : ''}`;
+    sel.disabled = true; sel.classList.add('locked'); // hesaba kilitli: açılır liste değil, düz etiket (ok yok)
+    sel.title = `GitHub hesabın: ${S.login}`;
     return;
   }
   // Tanınmayan hesap: Kağan'ın adı (yönetici) ve başka hesaplara bağlı adlar seçilemez
   const mapped = Object.values(LOGINS);
   let free = S.members.filter((m) => m !== ADMIN.name && !mapped.includes(m));
   if (!free.length) free = S.members.filter((m) => m !== ADMIN.name);
-  sel.disabled = false;
+  sel.disabled = false; sel.classList.remove('locked');
   sel.title = S.login ? `GitHub hesabın: ${S.login}` : '';
   sel.innerHTML = (S.user ? '' : '<option value="">İsmini seç</option>') + free.map((m) => `<option ${m === S.user ? 'selected' : ''}>${esc(m)}</option>`).join('');
   sel.onchange = () => { S.user = sel.value; ls.set('studio.user', S.user); route(); };

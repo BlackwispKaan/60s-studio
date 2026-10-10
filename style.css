@@ -572,3 +572,6 @@ select:disabled { opacity: 1; cursor: default; }
 .sugg-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px 12px; }
 .sugg-actions a.small { color: var(--info); text-decoration: none; }
 .sugg-actions a.small:hover { text-decoration: underline; }
+
+/* "Ben:" GitHub hesabına kilitliyse açılır liste görünümü (ok) yok */
+.who select.locked { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: none; cursor: default; padding-right: 10px; }

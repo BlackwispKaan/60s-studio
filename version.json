@@ -1,8 +1,13 @@
 {
- "v": 48,
- "at": "2026-10-10T13:41:49+00:00",
- "msg": "Ana sayfada önerilen oyunlar: 10 öneri, Başla / Gizle / Yenile; yönetici notları kaldırıldı",
+ "v": 49,
+ "at": "2026-10-10T13:47:29+00:00",
+ "msg": "Ben: hesaba kilitliyken açılır liste oku gösterilmiyor",
  "history": [
+  {
+   "v": 49,
+   "at": "2026-10-10T13:47:29+00:00",
+   "msg": "Ben: hesaba kilitliyken açılır liste oku gösterilmiyor"
+  },
   {
    "v": 48,
    "at": "2026-10-10T13:41:49+00:00",
@@ -97,11 +102,6 @@
    "v": 30,
    "at": "2026-10-07T03:09:47+00:00",
    "msg": "Vuruş kaldırıldı: Oyun ekranına bindirme + opsiyonel Ara klip (3 alternatif + Kullanma); alt barda ara klip sayacı"
-  },
-  {
-   "v": 29,
-   "at": "2026-10-07T03:00:01+00:00",
-   "msg": "Materyal aşaması bölüm bölüm: her bölüm kendi materyalleri + Seçimi değiştir"
   }
  ]
 }
