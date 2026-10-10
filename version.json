@@ -1,8 +1,13 @@
 {
- "v": 51,
- "at": "2026-10-10T15:50:03+00:00",
- "msg": "Önerilen oyunlar: Oyunlar ızgarasıyla arasına boşluk, başlık satırı düzeni",
+ "v": 52,
+ "at": "2026-10-10T15:52:48+00:00",
+ "msg": "Önerilen oyunlar başlığı sola hizalandı",
  "history": [
+  {
+   "v": 52,
+   "at": "2026-10-10T15:52:48+00:00",
+   "msg": "Önerilen oyunlar başlığı sola hizalandı"
+  },
   {
    "v": 51,
    "at": "2026-10-10T15:50:03+00:00",
@@ -97,11 +102,6 @@
    "v": 33,
    "at": "2026-10-07T03:53:25+00:00",
    "msg": "Bölüm tasarımı sadeleşti: opsiyonel/teknik/değişti notları kaldırıldı, meme blokları tam genişlik, not kutusu katlanır"
-  },
-  {
-   "v": 32,
-   "at": "2026-10-07T03:49:06+00:00",
-   "msg": "Bindirme de opsiyonel: Kullanma seçeneği (sadece ara klip / sadece bindirme / ikisi / hiçbiri)"
   }
  ]
 }

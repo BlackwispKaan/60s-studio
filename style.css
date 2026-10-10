@@ -556,7 +556,7 @@ select:disabled { opacity: 1; cursor: default; }
 .sugg-meta { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; margin-left: auto; }
 .sugg-meta .small { white-space: nowrap; }
 @media (max-width: 600px) { .sugg-meta { margin-left: 0; width: 100%; justify-content: space-between; } .sugg-meta .small { white-space: normal; } }
-.sugg-toggle { color: var(--text); }
+.sugg-toggle { color: var(--text); align-self: flex-start; text-align: left; padding: 0; }  /* düğme içeriği ortalanıyordu */
 .sugg-toggle h2 { margin: 0; }
 .sugg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 14px; }
 .sugg-grid[hidden] { display: none; }
