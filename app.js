@@ -596,11 +596,15 @@ async function renderSuggestions() {
   let queued = false;
   try { queued = (await S.store.list('queue')).some((f) => f.name.includes('-suggest-')); } catch {}
   const open = ls.get('studio.suggOpen', '1') === '1';
-  box.innerHTML = `<div class="row sugg-head">
-      <button type="button" class="link-btn sugg-toggle" id="suggToggle" aria-expanded="${open}"><h2>💡 Önerilen oyunlar ${open ? '▾' : '▸'}</h2></button>
-      <span class="small muted">Daha önce yapmadığımız, ilgi çekecek ve materyali bol oyunlar</span><span class="spacer"></span>
-      <span class="small muted" title="Havuzda henüz gösterilmemiş öneri sayısı">${queued ? `<span class="spinner" style="width:12px;height:12px;border-width:2px"></span> ${WORKER_NAME} yeni öneri arıyor · ` : ''}havuzda ${fresh} yeni${d.updatedAt ? ` · ${fmtDate(d.updatedAt)}` : ''}</span>
-      <button type="button" class="btn small" id="suggRefresh" title="Başladığınız ve gizlediğiniz oyunlar çıkar, yerine yenileri gelir. Hiçbirini seçmediyseniz listenin tamamı yenilenir.">🔄 Yenile</button>
+  box.innerHTML = `<div class="sugg-head">
+      <div class="sugg-title">
+        <button type="button" class="link-btn sugg-toggle" id="suggToggle" aria-expanded="${open}"><h2>💡 Önerilen oyunlar ${open ? '▾' : '▸'}</h2></button>
+        <div class="small muted">Daha önce yapmadığımız, ilgi çekecek ve materyali bol oyunlar</div>
+      </div>
+      <div class="sugg-meta">
+        <span class="small muted" title="Havuzda henüz gösterilmemiş öneri sayısı">${queued ? `<span class="spinner" style="width:12px;height:12px;border-width:2px"></span> ${WORKER_NAME} yeni öneri arıyor · ` : ''}havuzda ${fresh} yeni${d.updatedAt ? ` · ${fmtDate(d.updatedAt)}` : ''}</span>
+        <button type="button" class="btn small" id="suggRefresh" title="Başladığınız ve gizlediğiniz oyunlar çıkar, yerine yenileri gelir. Hiçbirini seçmediyseniz listenin tamamı yenilenir.">🔄 Yenile</button>
+      </div>
     </div>
     <div class="sugg-grid" ${open ? '' : 'hidden'}>${list.length ? list.map((x) => suggCardHtml(x, started.has(gameKey(x.title)))).join('')
       : `<p class="small muted">${queued ? `${WORKER_NAME} öneri havuzunu hazırlıyor; birkaç dakika sonra burada.` : `Henüz öneri yok. 🔄 Yenile'ye basınca ${WORKER_NAME} araştırmaya başlar.`}</p>`}</div>`;

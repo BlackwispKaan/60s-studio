@@ -1,8 +1,13 @@
 {
- "v": 50,
- "at": "2026-10-10T15:40:03+00:00",
- "msg": "Kullanım limiti: Türkçe ve devam saatli gösterim (eski 'hata' kayıtları da limit sayılır); önerilen oyunlar Oyunlar bölümünün altında",
+ "v": 51,
+ "at": "2026-10-10T15:50:03+00:00",
+ "msg": "Önerilen oyunlar: Oyunlar ızgarasıyla arasına boşluk, başlık satırı düzeni",
  "history": [
+  {
+   "v": 51,
+   "at": "2026-10-10T15:50:03+00:00",
+   "msg": "Önerilen oyunlar: Oyunlar ızgarasıyla arasına boşluk, başlık satırı düzeni"
+  },
   {
    "v": 50,
    "at": "2026-10-10T15:40:03+00:00",
@@ -97,11 +102,6 @@
    "v": 32,
    "at": "2026-10-07T03:49:06+00:00",
    "msg": "Bindirme de opsiyonel: Kullanma seçeneği (sadece ara klip / sadece bindirme / ikisi / hiçbiri)"
-  },
-  {
-   "v": 31,
-   "at": "2026-10-07T03:20:21+00:00",
-   "msg": "Tekrar eden açıklamalar kaldırıldı (üzerine gelince ipucu)"
   }
  ]
 }
