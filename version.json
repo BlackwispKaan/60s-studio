@@ -1,8 +1,13 @@
 {
- "v": 56,
- "at": "2026-10-11T17:01:14+00:00",
- "msg": "Metin kartlarında 🎭 okuma yönü (v3 etiketleri); Entegrasyonlar'da okuma tarzı seçimi (oyunculu: v3 → orijinal ses)",
+ "v": 58,
+ "at": "2026-10-11T17:55:50+00:00",
+ "msg": "v57: Okuma tarzı seçenekleri (Eleven v4 → orijinal ses önerilen, v4 doğrudan, v3, düz)",
  "history": [
+  {
+   "v": 58,
+   "at": "2026-10-11T17:55:50+00:00",
+   "msg": "v57: Okuma tarzı seçenekleri (Eleven v4 → orijinal ses önerilen, v4 doğrudan, v3, düz)"
+  },
   {
    "v": 56,
    "at": "2026-10-11T17:01:14+00:00",
@@ -97,11 +102,6 @@
    "v": 38,
    "at": "2026-10-07T04:55:24+00:00",
    "msg": "Önizleme ses ayarı (genel); kanon/green katalog seçimi yuvanın içine aday olarak eklenir (tek seçim)"
-  },
-  {
-   "v": 37,
-   "at": "2026-10-07T04:35:11+00:00",
-   "msg": "Ses efekti seçimi kaldırıldı (worker kurguda ayarlar)"
   }
  ]
 }

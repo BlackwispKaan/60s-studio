@@ -1843,9 +1843,10 @@ async function renderIntegrations() {
         <span class="small muted">ElevenLabs → Voices → anlatıcı sesinin yanındaki ⋯ → <b>Copy voice ID</b>.</span></div>
       <div class="field"><label for="elDelivery">Okuma tarzı</label>
         <select id="elDelivery" ${dis}>
-          <option value="v3_sts" ${el.delivery === 'v3_sts' ? 'selected' : ''}>Oyunculu: v3 performansı → orijinal ses (önerilen)</option>
-          <option value="v2" ${el.delivery !== 'v3_sts' ? 'selected' : ''}>Standart: düz okuma (aşağıdaki model)</option></select>
-        <span class="small muted">Oyunculu: metindeki 🎭 duygu etiketleriyle tek kayıt üretilir, sonra ses orijinal Loyal sesine dönüştürülür.</span></div>
+          ${[['v4_sts', 'Oyunculu: v4 performansı → orijinal ses (önerilen)'], ['v4', 'Oyunculu: v4 doğrudan (dönüştürmesiz)'],
+             ['v3_sts', 'Oyunculu: v3 performansı → orijinal ses (eski)'], ['v2', 'Standart: düz okuma (aşağıdaki model)']]
+            .map(([v, l]) => `<option value="${v}" ${(el.delivery || 'v2') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <span class="small muted">Oyunculu: metindeki 🎭 duygu etiketleri ve BÜYÜK HARF vurgularıyla tek kayıt üretilir (${el.takes || 3} deneme, en net ve en canlı okuma seçilir), sonra ses orijinal Loyal sesine dönüştürülür.</span></div>
       <div class="field"><label for="elModel">Model</label>
         <select id="elModel" ${dis}>${ELEVEN_MODELS.map(([v, l]) => `<option value="${v}" ${el.modelId === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${num('elStab', 'Stabilite', el.stability ?? 0.45, 0, 1, 0.05, 'Düşük = daha duygulu/değişken, yüksek = daha düz ve tutarlı.')}
