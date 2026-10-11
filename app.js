@@ -485,7 +485,6 @@ async function renderHome() {
       <p class="muted" style="margin:0">Yeni bir oyun yaz. ${WORKER_NAME} oyunu ve topluluğun esprilerini araştırır, her bölüm için seçenekli metin hazırlar.</p>
       ${channelButton()}
     </div>
-    ${workerBanner()}
     ${S.store.demo ? '<div class="card small" style="margin-bottom:16px;border-color:var(--warn)">⚠️ <b>Demo modu</b>: yerel dosyalar okunuyor, değişiklikler kaydedilmez. Kaydetmek için ⚙ ile token gir.</div>' : ''}
     <form class="new-game card" id="newGame" style="margin-bottom:16px">
       <input type="text" id="newGameName" placeholder="Oyun adı (örn. Elden Ring)" required maxlength="60">
@@ -1876,6 +1875,8 @@ function jobName(j) {
 }
 // Kullanım limiti (Claude oturum / haftalık limit): devam saati Türkçe ve net yazılır (Kağan 2026-10-10).
 // Eski kayıtlarda limit "hata" olarak geçebiliyor ("You've hit your session limit · resets 6:10pm") → mesajdan da anlaşılır.
+// Giriş / erişim sorunu (limit değil, kendiliğinden düzelmez): "Your organization has disabled Claude subscription access…"
+const AUTH_RE = /disabled Claude subscription access|not logged in|please run \/login|invalid api key|authentication_error|OAuth token/i;
 const LIMIT_RE = /(usage|session|weekly|5-hour) limit|limit reached|hit your( \w+)? limit|out of (extra )?usage/i;
 function limitReset(w) {
   if (w.resetAt) return new Date(w.resetAt);
@@ -1913,6 +1914,8 @@ function workerView(w0) {
   if (w.state === 'running' && ageH > 3) return { cls: 'warn', short: '⚠️ Çırak yanıt vermiyor', long: `Son durum ${fmtTime(w.at)}: "${w.job}" çalışıyordu ama 3 saattir haber yok. Kağan'ın bilgisayarı kapanmış olabilir; açılınca iş devam eder.` };
   if (w.state === 'running') return { cls: 'run', short: '🟢 Çalışıyor', long: `${WORKER_NAME} şu işi yapıyor: ${w.job}` };
   if (w.state === 'limited' || (w.state === 'error' && LIMIT_RE.test(w.message || ''))) return { cls: 'warn', ...limitView(w, w.job), banner: true, limit: true };
+  if (w.state === 'error' && AUTH_RE.test(w.message || '')) return { cls: 'bad', short: '🔒 Çırak giriş sorunu', banner: true, limit: true,
+    long: `${WORKER_NAME} Claude hesabına bağlanamıyor (Claude Code erişimi kapalı görünüyor), bu yüzden işler bekliyor${w.job ? `; sıradaki: “${w.job}”` : ''}. Limit değil, kendiliğinden düzelmez: Kağan'ın bilgisayarında ${WORKER_NAME}'ın girişi yenilenmeli.` };
   if (w.state === 'error') return { cls: 'bad', short: '⚠️ Çırak hatası', long: `"${w.job || ''}" işinde hata oldu: ${w.message}. Kuyruktaki iş 5 dakika sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.`, banner: true };
   return { cls: 'idle', short: '● Boşta', long: `${WORKER_NAME} boşta. ${w.message || ''} (${fmtTime(w.at)})` };
 }
@@ -1957,7 +1960,9 @@ async function renderTaskList() {
   };
   const state = v ? `<span class="worker-pill ${v.cls}" title="${esc(v.long)}">${esc(v.short)}</span>` : '';
   const isLimit = w && (w.state === 'limited' || (w.state === 'error' && LIMIT_RE.test(w.message || '')));
+  const isAuth = w && w.state === 'error' && AUTH_RE.test(w.message || '');
   const limitRow = isLimit ? `<div class="task-alert warn">⏸ <div>${esc(limitView(w, jobName(w.job)).long)}${jobs.length ? ` <span class="muted">(${jobs.length} iş bekliyor)</span>` : ''}</div></div>`
+    : isAuth ? `<div class="task-alert bad">🔒 <div>${esc(v.long)}</div></div>`
     : w?.state === 'error' ? `<div class="task-alert bad">⚠️ <div><b>Son işte hata oldu.</b> ${esc((w.message || '').slice(0, 200))} — 5 dk sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.</div></div>` : '';
   box.innerHTML = `<div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span>${state}</div>${limitRow}
     ${jobs.length ? `<div class="tasks-list">${jobs.map(line).join('')}</div>
@@ -2000,6 +2005,7 @@ function parseActivity(c) {
       const r = limitReset({ resetAt: parts.reset, message: msg, at: c.at });
       return { ...base, icon: '⏸', alert: 'warn', text: `Claude kullanım limiti doldu${job ? `; “${job}” yarım kaldı` : ''}. ${r ? `Devam saati: ${r.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}.` : 'Limit sıfırlanınca devam eder.'}` };
     }
+    if (d[1] === 'error' && AUTH_RE.test(msg)) return { ...base, icon: '🔒', alert: 'bad', text: `Claude hesabına bağlanamadı${job ? ` (${job})` : ''}: Claude Code erişimi kapalı, giriş yenilenmeli.` };
     if (d[1] === 'error') return { ...base, icon: '⚠️', alert: 'bad', text: `hata oldu${job ? ` (${job})` : ''}: ${d[2].split(' | ')[1] || ''}`.slice(0, 220) };
     return null;
   }
