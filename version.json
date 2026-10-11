@@ -1,8 +1,13 @@
 {
- "v": 54,
- "at": "2026-10-11T11:50:40+00:00",
- "msg": "Çırak durumu ana sayfada tek yerde (iş listesi); giriş/erişim hatası limitten ayrı ve açık yazılır",
+ "v": 55,
+ "at": "2026-10-11T13:07:40+00:00",
+ "msg": "Materyal kartlarında 🔇 sessiz rozeti ve sessiz ara klip uyarısı; ara klip içi ses efekti etiketi",
  "history": [
+  {
+   "v": 55,
+   "at": "2026-10-11T13:07:40+00:00",
+   "msg": "Materyal kartlarında 🔇 sessiz rozeti ve sessiz ara klip uyarısı; ara klip içi ses efekti etiketi"
+  },
   {
    "v": 54,
    "at": "2026-10-11T11:50:40+00:00",
@@ -97,11 +102,6 @@
    "v": 36,
    "at": "2026-10-07T04:28:19+00:00",
    "msg": "Green screen kataloğundan seç (bindirme yuvalarında); 'Kanondan ara klip ekle'"
-  },
-  {
-   "v": 35,
-   "at": "2026-10-07T04:06:00+00:00",
-   "msg": "Seçime geri dön: materyal listesi ve MATERIALS.md sıfırlanır; seçim aşamasında materyal listesi gösterilmez"
   }
  ]
 }

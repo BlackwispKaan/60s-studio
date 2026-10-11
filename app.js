@@ -928,7 +928,9 @@ function itemHtml(g, sec, x, ed) {
   return `<div class="item" data-entry="${esc(key)}">
     <div class="slot-media">${entryMediaHtml(g, x, x.kind)}</div>
     <div class="slot-body">
-      <div class="item-head"><span class="kind-badge k-${esc(x.kind)}" title="${esc(k.hint || '')}">${k.icon} ${esc(k.label)}</span> <b>${esc(x.title || '')}</b>${x.tr ? ` <span class="small muted">· ${esc(x.tr)}</span>` : ''}</div>
+      <div class="item-head"><span class="kind-badge k-${esc(x.kind)}" title="${esc(k.hint || '')}">${k.icon} ${esc(k.label)}</span> <b>${esc(x.title || '')}</b>${x.tr ? ` <span class="small muted">· ${esc(x.tr)}</span>` : ''}
+        ${x.silent ? `<span class="kind-badge k-silent" title="Bu klibin kendi sesi yok">🔇 sessiz</span>` : ''}${x.opts?.in_cut ? `<span class="kind-badge k-sfx" title="Ara klibin içinde çalar">ara klipte</span>` : ''}</div>
+      ${x.silent && x.kind === 'cutaway' && !(sec.media?.items || []).some((y) => y.kind === 'sfx' && y.opts?.in_cut) ? `<div class="need-warn">🔇 Bu ara klibin kendi sesi yok: ara klip boyunca hiç ses olmaz. Sesli bir klip seçin ya da ses efekti ekleyin.</div>` : ''}
       ${x.why ? `<div class="need-why">💡 ${esc(x.why)}</div>` : ''}
       <div class="row small item-opts">
         ${ed ? `<button type="button" class="at-chip" data-at="${esc(key)}" title="Anlatıcı hangi kelimeyi söylerken girsin? Boş bırakırsan ${WORKER_NAME} seçer.">⏱ ${x.at ? `“${esc(x.at)}”` : 'giriş anı: otomatik'}</button>`
