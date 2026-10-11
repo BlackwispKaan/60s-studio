@@ -1,8 +1,13 @@
 {
- "v": 55,
- "at": "2026-10-11T13:07:40+00:00",
- "msg": "Materyal kartlarında 🔇 sessiz rozeti ve sessiz ara klip uyarısı; ara klip içi ses efekti etiketi",
+ "v": 56,
+ "at": "2026-10-11T17:01:14+00:00",
+ "msg": "Metin kartlarında 🎭 okuma yönü (v3 etiketleri); Entegrasyonlar'da okuma tarzı seçimi (oyunculu: v3 → orijinal ses)",
  "history": [
+  {
+   "v": 56,
+   "at": "2026-10-11T17:01:14+00:00",
+   "msg": "Metin kartlarında 🎭 okuma yönü (v3 etiketleri); Entegrasyonlar'da okuma tarzı seçimi (oyunculu: v3 → orijinal ses)"
+  },
   {
    "v": 55,
    "at": "2026-10-11T13:07:40+00:00",
@@ -97,11 +102,6 @@
    "v": 37,
    "at": "2026-10-07T04:35:11+00:00",
    "msg": "Ses efekti seçimi kaldırıldı (worker kurguda ayarlar)"
-  },
-  {
-   "v": 36,
-   "at": "2026-10-07T04:28:19+00:00",
-   "msg": "Green screen kataloğundan seç (bindirme yuvalarında); 'Kanondan ara klip ekle'"
   }
  ]
 }

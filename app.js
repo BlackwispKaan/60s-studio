@@ -794,6 +794,12 @@ function narrHtml(text, g) {
   if (cl && t.endsWith(cl)) { post = cl; t = t.slice(0, -cl.length).trim(); }
   return `${pre ? `<span class="fixed-line" title="Sabit açılış: her videoda aynı">${esc(pre)}</span> ` : ''}${esc(t)}${post ? ` <span class="fixed-line" title="Sabit kapanış: her videoda aynı">${esc(post)}</span>` : ''}`;
 }
+// Okuma yönü (v3 duygu etiketleri): "[excited] Whac-A-Mole…" — sadece etiketli yerler vurgulanır
+function voiceHtml(o) {
+  if (!o.voice || !/\[[^\]]+\]/.test(o.voice)) return '';
+  const html = esc(o.voice).replace(/\[([^\]]+)\]/g, '<span class="vtag">$1</span>');
+  return `<div class="opt-voice small" lang="en" title="Anlatıcının okuma yönü (ElevenLabs v3 etiketleri, ses orijinal kalır)">🎭 ${html}</div>`;
+}
 function sourcesHtml(o) {
   const list = [...(o.sources || []), ...(o.source ? [o.source] : [])].filter((x) => x?.url);
   return list.length ? `<div class="opt-srcs">${list.map((x) => `<a class="opt-src small" href="${esc(x.url)}" target="_blank" rel="noopener" title="Esprinin kaynağı">💬 ${esc(x.label || shortUrl(x.url))} ↗</a>`).join('')}</div>` : '';
@@ -804,7 +810,7 @@ function optionHtml(sec, o, g) {
     <span class="radio"></span>
     <div class="opt-en" lang="en"><span class="opt-letter">${esc(o.id.toUpperCase())}</span>“${narrHtml(o.narration, g)}”</div>
     <div class="opt-tr"><span class="tr-badge">TR</span>${esc(o.tr)}</div>
-    ${sourcesHtml(o)}
+    ${voiceHtml(o)}${sourcesHtml(o)}
   </div>`;
 }
 function scriptSectionHtml(sec, i, g, editable) {
@@ -951,7 +957,7 @@ function mediaSectionHtml(g, sec, i, ed, sub = false) {
   const miss = !(m.gameplay || []).some((x) => x.src);
   return `<section class="${sub ? 'media-sub' : 'card'} media-sec" id="sec-${esc(sec.id)}">
     <div class="section-head"><span class="section-num">S${i + 1}</span><h2>${esc(sec.title)}</h2>${miss ? '<span class="pill warn-pill">görüntü eksik</span>' : ''}</div>
-    ${o ? `<div class="line-quote"><div class="opt-en" lang="en">“${narrHtml(o.narration, g)}”</div><div class="opt-tr small">${esc(o.tr)}</div></div>` : ''}
+    ${o ? `<div class="line-quote"><div class="opt-en" lang="en">“${narrHtml(o.narration, g)}”</div><div class="opt-tr small">${esc(o.tr)}</div>${voiceHtml(o)}</div>` : ''}
     ${m.reply ? `<div class="need-why sec-reply">🤖 <b>${WORKER_NAME}:</b> ${esc(m.reply)}</div>` : ''}
     <div class="mblock"><div class="mblock-head">🎮 Oyun görüntüsü</div>
       ${(m.gameplay || []).map((x) => gpSlotHtml(g, sec, x, ed)).join('') || `<p class="small muted">Henüz görüntü yok.</p>`}
@@ -1835,6 +1841,11 @@ async function renderIntegrations() {
       <div class="field"><label for="elVoice">Ses kimliği (Voice ID)</label>
         <input type="text" id="elVoice" value="${esc(el.voiceId || '')}" placeholder="örn. 21m00Tcm4TlvDq8ikWAM" ${dis}>
         <span class="small muted">ElevenLabs → Voices → anlatıcı sesinin yanındaki ⋯ → <b>Copy voice ID</b>.</span></div>
+      <div class="field"><label for="elDelivery">Okuma tarzı</label>
+        <select id="elDelivery" ${dis}>
+          <option value="v3_sts" ${el.delivery === 'v3_sts' ? 'selected' : ''}>Oyunculu: v3 performansı → orijinal ses (önerilen)</option>
+          <option value="v2" ${el.delivery !== 'v3_sts' ? 'selected' : ''}>Standart: düz okuma (aşağıdaki model)</option></select>
+        <span class="small muted">Oyunculu: metindeki 🎭 duygu etiketleriyle tek kayıt üretilir, sonra ses orijinal Loyal sesine dönüştürülür.</span></div>
       <div class="field"><label for="elModel">Model</label>
         <select id="elModel" ${dis}>${ELEVEN_MODELS.map(([v, l]) => `<option value="${v}" ${el.modelId === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       ${num('elStab', 'Stabilite', el.stability ?? 0.45, 0, 1, 0.05, 'Düşük = daha duygulu/değişken, yüksek = daha düz ve tutarlı.')}
@@ -1855,7 +1866,7 @@ async function renderIntegrations() {
         const f = await readJSON('config/integrations.json');
         const data = f?.data || {};
         const e = (data.elevenlabs = { ...(data.elevenlabs || {}) });
-        e.voiceId = $('#elVoice').value.trim(); e.modelId = $('#elModel').value;
+        e.voiceId = $('#elVoice').value.trim(); e.modelId = $('#elModel').value; e.delivery = $('#elDelivery').value;
         e.stability = +$('#elStab').value; e.similarity = +$('#elSim').value; e.style = +$('#elStyle').value; e.speed = +$('#elSpeed').value;
         if (enc) { e.apiKeyEnc = enc; e.apiKeySetBy = S.user; e.apiKeySetAt = nowIso(); }
         try { await S.store.put('config/integrations.json', JSON.stringify(data, null, 2) + '\n', `[${S.user}] ElevenLabs ayarları${enc ? ' (anahtar güncellendi)' : ''}`, f?.sha); break; }
