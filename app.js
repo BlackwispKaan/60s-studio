@@ -1295,8 +1295,8 @@ function busyText(g) {
     drafting: 'ilk deneme videosunu kuruyor (geçici sesle; süreler burada belirlenir)',
     voicing: `anlatıcı sesini ve ses miksajını ekliyor${lv?.draft ? ` (taslak v${lv.v} hazır, aşağıda izleyebilirsiniz)` : ''}`,
     queued_revision: `notları sıraya aldı: v${nv} hazırlanacak`,
-    queued_render: `x${g.settings?.outputSpeed || 1} hızı sıraya aldı: v${nv} hazırlanacak (birkaç dakika)`,
-    rendering: `x${g.settings?.outputSpeed || 1} hızla v${nv}'i hazırlıyor`,
+    queued_render: `onaylandı: son video x${g.settings?.outputSpeed || 1} hızla hazırlanacak (birkaç dakika)`,
+    rendering: `son videoyu x${g.settings?.outputSpeed || 1} hızla hazırlıyor (v${nv})`,
     revising: `düzeltiyor: v${nv} hazırlanıyor`,
   }[st] || 'çalışıyor';
 }
@@ -1358,14 +1358,16 @@ function reviewHtml(g) {
 }
 /* çıktı hızı: oynatıcıda anında önizle (perde korunur), kaydedince Çırak bu hızla yeni sürüm üretir (kredi harcamaz) */
 const SPEEDS = [1, 1.05, 1.1, 1.15, 1.2];
+// Kağan 2026-10-12: hız yalnız SON videoyu belirler — kaydedince yeni sürüm üretilmez; "✓ Onayla, bitti"de son video bu hızla hazırlanır
 function speedBoxHtml(g, sel, live) {
-  const base = sel.speed || 1, want = S.revSpeed[g.slug] ?? base;
+  const base = sel.speed || 1, saved = g.settings?.outputSpeed || 1, want = S.revSpeed[g.slug] ?? saved;
   const total = sel.duration ? Math.round(sel.duration * base / want) : null;
   return `<div class="speed-box">
-    <span class="small" style="font-weight:600">Hız</span>
+    <span class="small" style="font-weight:600">Son video hızı</span>
     <div class="seg" id="speedSeg">${SPEEDS.map((x) => `<button type="button" data-sp="${x}" class="${Math.abs(x - want) < 1e-6 ? 'on' : ''}">${x}×</button>`).join('')}</div>
-    <span class="small muted">${total ? `≈ ${total} sn` : ''}${base !== 1 ? ` · bu sürüm x${base}` : ''}</span>
-    ${live && Math.abs(want - base) > 1e-6 ? `<button type="button" class="btn btn-primary" id="speedSave">Bu hızla kaydet → v${latestVersion(g).v + 1}</button>` : ''}
+    <span class="small muted">${total ? `≈ ${total} sn` : ''}</span>
+    ${live && Math.abs(want - saved) > 1e-6 ? `<button type="button" class="btn btn-primary" id="speedSave">Hızı kaydet (x${want})</button>` : ''}
+    <span class="small muted">${saved !== 1 ? `Kayıtlı: x${saved} · “Onayla, bitti” deyince son video bu hızla hazırlanır` : 'Oynatıcıda önizlenir; kaydedersen onayda uygulanır'}</span>
   </div>`;
 }
 function mediaCardHtml(g, ed) {
@@ -1409,7 +1411,7 @@ function bindReview(slug) {
   }
   const seek = (t) => { if (!v) return; v.currentTime = Math.max(0, +t || 0); noteT = null; showT(); };
   const selV = () => { const vs = cur().versions || []; return vs.find((x) => x.v === S.revView[slug]) || latestVersion(cur()); };
-  const applyRate = () => { if (!v) return; const want = S.revSpeed[slug] ?? (selV().speed || 1); v.preservesPitch = true; v.playbackRate = want / (selV().speed || 1); };
+  const applyRate = () => { if (!v) return; const want = S.revSpeed[slug] ?? (cur().settings?.outputSpeed || 1); v.preservesPitch = true; v.playbackRate = want / (selV().speed || 1); };
   if (v) { v.addEventListener('loadedmetadata', applyRate); applyRate(); }
   const bindReviewSpeed = () => {
     $$('#speedSeg button').forEach((b) => b.onclick = () => { S.revSpeed[slug] = +b.dataset.sp; const box = $('.speed-box');
@@ -1418,9 +1420,8 @@ function bindReview(slug) {
     if (sv) sv.onclick = async () => {
       const sp = S.revSpeed[slug]; sv.disabled = true;
       try {
-        await mutateGame(slug, (x) => { x.settings = x.settings || {}; x.settings.outputSpeed = sp; x.status = 'queued_render'; logLine(x, `Çıktı hızı x${sp} istendi`); }, `hız x${sp}`);
-        await enqueue('rerender', slug, { speed: sp });
-        toast(`x${sp} sıraya alındı ✓ ${WORKER_NAME} birkaç dakikada yeni sürümü hazırlar (kredi harcamaz)`);
+        await mutateGame(slug, (x) => { x.settings = x.settings || {}; x.settings.outputSpeed = sp; logLine(x, `Son video hızı x${sp} olarak kaydedildi`); }, `hız x${sp}`);
+        toast(`Kaydedildi ✓ “Onayla, bitti” deyince son video x${sp} hızla hazırlanır`);
         delete S.revSpeed[slug]; renderGame(slug);
       } catch (e) { toast('Kaydedilemedi: ' + e.message, true); sv.disabled = false; }
     };
@@ -1489,6 +1490,13 @@ function bindReview(slug) {
   if (ap) ap.onclick = async () => {
     if (pendingChanges(cur()) && !confirm('Gönderilmemiş notlar / materyal değişiklikleri var. Yine de onaylansın mı?')) return;
     await flush(slug);
+    const sp = cur().settings?.outputSpeed || 1, lvs = latestVersion(cur()).speed || 1;
+    if (Math.abs(sp - lvs) > 1e-6) {  // kayıtlı hız → son video o hızla (Çırak, kredisiz), bitince "Tamamlandı"
+      await mutateGame(slug, (x) => { x.status = 'queued_render'; logLine(x, `v${latestVersion(x).v} onaylandı; son video x${sp} hızla hazırlanıyor.`); }, `onaylandı · hız x${sp}`);
+      await enqueue('rerender', slug, { speed: sp, final: true });
+      toast(`Onaylandı ✓ ${WORKER_NAME} son videoyu x${sp} hızla hazırlıyor (birkaç dakika, kredi harcamaz)`); renderGame(slug);
+      return;
+    }
     await mutateGame(slug, (x) => { x.status = 'done'; logLine(x, `v${latestVersion(x).v} onaylandı.`); }, 'onaylandı');
     toast('Tebrikler! 🎉'); renderGame(slug);
   };

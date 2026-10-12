@@ -1,8 +1,13 @@
 {
- "v": 60,
- "at": "2026-10-12T15:09:43+00:00",
- "msg": "Çırak aç/kapa + effort (yalnız Kağan), iş listesi duraklatıldı görünümü; İnceleme'de çıktı hızı seçici (önizleme + kaydet → yeniden render)",
+ "v": 62,
+ "at": "2026-10-12T16:32:59+00:00",
+ "msg": "Hız yalnız son video: 'Hızı kaydet' sadece ayar; 'Onayla, bitti' son videoyu kayıtlı hızla ürettirir",
  "history": [
+  {
+   "v": 62,
+   "at": "2026-10-12T16:32:59+00:00",
+   "msg": "Hız yalnız son video: 'Hızı kaydet' sadece ayar; 'Onayla, bitti' son videoyu kayıtlı hızla ürettirir"
+  },
   {
    "v": 60,
    "at": "2026-10-12T15:09:43+00:00",
@@ -97,11 +102,6 @@
    "v": 40,
    "at": "2026-10-07T08:38:44+00:00",
    "msg": "Seçenek ayrıntıları seçilene kadar katlı (mobilde kısa kaydırma)"
-  },
-  {
-   "v": 39,
-   "at": "2026-10-07T07:42:19+00:00",
-   "msg": "Ekranda satırı seçimlerden canlı üretilir; Ses satırı kaldırıldı"
   }
  ]
 }
