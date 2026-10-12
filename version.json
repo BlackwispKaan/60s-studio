@@ -1,8 +1,13 @@
 {
- "v": 58,
- "at": "2026-10-11T17:55:50+00:00",
- "msg": "v57: Okuma tarzı seçenekleri (Eleven v4 → orijinal ses önerilen, v4 doğrudan, v3, düz)",
+ "v": 60,
+ "at": "2026-10-12T15:09:43+00:00",
+ "msg": "Çırak aç/kapa + effort (yalnız Kağan), iş listesi duraklatıldı görünümü; İnceleme'de çıktı hızı seçici (önizleme + kaydet → yeniden render)",
  "history": [
+  {
+   "v": 60,
+   "at": "2026-10-12T15:09:43+00:00",
+   "msg": "Çırak aç/kapa + effort (yalnız Kağan), iş listesi duraklatıldı görünümü; İnceleme'de çıktı hızı seçici (önizleme + kaydet → yeniden render)"
+  },
   {
    "v": 58,
    "at": "2026-10-11T17:55:50+00:00",
@@ -97,11 +102,6 @@
    "v": 39,
    "at": "2026-10-07T07:42:19+00:00",
    "msg": "Ekranda satırı seçimlerden canlı üretilir; Ses satırı kaldırıldı"
-  },
-  {
-   "v": 38,
-   "at": "2026-10-07T04:55:24+00:00",
-   "msg": "Önizleme ses ayarı (genel); kanon/green katalog seçimi yuvanın içine aday olarak eklenir (tek seçim)"
   }
  ]
 }

@@ -588,3 +588,10 @@ select:disabled { opacity: 1; cursor: default; }
 .k-silent { background: #4a3a1f; color: #ffd08a; margin-left: 4px; }
 .opt-voice { margin-top: 6px; color: var(--muted); font-style: italic; }
 .vtag { font-style: normal; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--info) 22%, transparent); color: var(--text); }
+
+/* Çırak aç/kapa + effort (yalnız Kağan) */
+.worker-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 8px 0 4px; }
+.worker-ctl select { margin-left: 6px; }
+
+/* çıktı hızı seçici (İnceleme oynatıcısı altında) */
+.speed-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }

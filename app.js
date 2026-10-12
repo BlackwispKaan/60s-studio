@@ -32,6 +32,8 @@ const STATUS = {
   review:           { label: 'İncelemede', step: 6 },
   queued_revision:  { label: 'Düzeltme sırada', step: 6 },
   revising:         { label: 'Düzeltiliyor', step: 6 },
+  queued_render:    { label: 'Hız sırada', step: 6 },
+  rendering:        { label: 'Hız uygulanıyor', step: 6 },
   done:             { label: 'Tamamlandı', step: 7 },
 };
 const LEGACY_STATUS = { choosing: 'script', collecting: 'materials', queued_edit: 'queued_build', editing: 'drafting' };
@@ -225,6 +227,7 @@ const S = {
   saveTimers: new Map(),
   revView: {}, // slug -> incelenen sürüm
   revTime: {}, // slug -> oynatıcı konumu (yeniden çizimde korunur)
+  revSpeed: {}, // slug -> İnceleme'de denenen çıktı hızı (kaydedilene kadar yalnız önizleme)
   pubEdit: {}, // slug -> yayın linki düzenleniyor
   revDraft: {}, // slug -> yazılmakta olan not
   mediaOpen: {}, // slug -> incelemede materyal kartı açık mı
@@ -1284,7 +1287,7 @@ function notesHtml(g, sel, canEdit, busy) {
       ${n.reply ? `<div class="note-reply ${esc(n.state || '')}">${n.state === 'skipped' ? '↷' : n.state === 'question' ? '❓' : '✓'} ${esc(n.reply)}${n.rev.outV ? ` <span class="muted">→ v${n.rev.outV}</span>` : ''}</div>`
         : `<div class="note-reply wait">${busy ? `⏳ ${WORKER_NAME} uyguluyor` : 'sırada'}</div>`}</div></div>`).join('');
 }
-const BUSY = ['queued_build', 'drafting', 'voicing', 'queued_revision', 'revising'];
+const BUSY = ['queued_build', 'drafting', 'voicing', 'queued_revision', 'revising', 'queued_render', 'rendering'];
 function busyText(g) {
   const lv = latestVersion(g), nv = (lv?.v || 0) + 1, st = stOf(g);
   return {
@@ -1292,6 +1295,8 @@ function busyText(g) {
     drafting: 'ilk deneme videosunu kuruyor (geçici sesle; süreler burada belirlenir)',
     voicing: `anlatıcı sesini ve ses miksajını ekliyor${lv?.draft ? ` (taslak v${lv.v} hazır, aşağıda izleyebilirsiniz)` : ''}`,
     queued_revision: `notları sıraya aldı: v${nv} hazırlanacak`,
+    queued_render: `x${g.settings?.outputSpeed || 1} hızı sıraya aldı: v${nv} hazırlanacak (birkaç dakika)`,
+    rendering: `x${g.settings?.outputSpeed || 1} hızla v${nv}'i hazırlıyor`,
     revising: `düzeltiyor: v${nv} hazırlanıyor`,
   }[st] || 'çalışıyor';
 }
@@ -1320,6 +1325,7 @@ function reviewHtml(g) {
         ${sel.preview ? `<video id="revVideo" playsinline controls preload="auto" data-src="${esc(sel.preview)}"></video><div class="player-loading" id="revLoading"><span class="spinner"></span></div>`
           : `<div class="player-empty small muted">Bu sürümün site önizlemesi yok (sadece son sürümler tutulur).<br>Drive: <code>${esc((sel.file || '').split(/[\\/]/).slice(-2).join('/'))}</code></div>`}
         <div class="small muted player-meta">Önizleme 720p · tam kalite Drive'da: <code>${esc((sel.file || '').split(/[\\/]/).slice(-2).join('/'))}</code> ${driveLink(g, 'link-btn')}</div>
+        ${sel.preview ? speedBoxHtml(g, sel, live) : ''}
       </div>
       <div class="side">
         <div class="side-title">Ekranda neler var <span class="small muted">· tıklayınca o ana gider</span></div>
@@ -1349,6 +1355,18 @@ function reviewHtml(g) {
     ${busy ? `<div class="busy-note"><span class="spinner"></span> <b>${WORKER_NAME}</b> ${esc(busyText(g))}. Bitince burada görünür.</div>` : ''}
     ${st === 'done' ? publishBox(g) : ''}
   </section>`;
+}
+/* çıktı hızı: oynatıcıda anında önizle (perde korunur), kaydedince Çırak bu hızla yeni sürüm üretir (kredi harcamaz) */
+const SPEEDS = [1, 1.05, 1.1, 1.15, 1.2];
+function speedBoxHtml(g, sel, live) {
+  const base = sel.speed || 1, want = S.revSpeed[g.slug] ?? base;
+  const total = sel.duration ? Math.round(sel.duration * base / want) : null;
+  return `<div class="speed-box">
+    <span class="small" style="font-weight:600">Hız</span>
+    <div class="seg" id="speedSeg">${SPEEDS.map((x) => `<button type="button" data-sp="${x}" class="${Math.abs(x - want) < 1e-6 ? 'on' : ''}">${x}×</button>`).join('')}</div>
+    <span class="small muted">${total ? `≈ ${total} sn` : ''}${base !== 1 ? ` · bu sürüm x${base}` : ''}</span>
+    ${live && Math.abs(want - base) > 1e-6 ? `<button type="button" class="btn btn-primary" id="speedSave">Bu hızla kaydet → v${latestVersion(g).v + 1}</button>` : ''}
+  </div>`;
 }
 function mediaCardHtml(g, ed) {
   if (!isV2(g) || !g.sections.some((s) => s.media)) return '';
@@ -1390,6 +1408,24 @@ function bindReview(slug) {
     v.addEventListener('play', () => { noteT = null; showT(); });
   }
   const seek = (t) => { if (!v) return; v.currentTime = Math.max(0, +t || 0); noteT = null; showT(); };
+  const selV = () => { const vs = cur().versions || []; return vs.find((x) => x.v === S.revView[slug]) || latestVersion(cur()); };
+  const applyRate = () => { if (!v) return; const want = S.revSpeed[slug] ?? (selV().speed || 1); v.preservesPitch = true; v.playbackRate = want / (selV().speed || 1); };
+  if (v) { v.addEventListener('loadedmetadata', applyRate); applyRate(); }
+  const bindReviewSpeed = () => {
+    $$('#speedSeg button').forEach((b) => b.onclick = () => { S.revSpeed[slug] = +b.dataset.sp; const box = $('.speed-box');
+      if (box) box.outerHTML = speedBoxHtml(cur(), selV(), stOf(cur()) === 'review' && selV().v === latestVersion(cur()).v); bindReviewSpeed(); applyRate(); });
+    const sv = $('#speedSave');
+    if (sv) sv.onclick = async () => {
+      const sp = S.revSpeed[slug]; sv.disabled = true;
+      try {
+        await mutateGame(slug, (x) => { x.settings = x.settings || {}; x.settings.outputSpeed = sp; x.status = 'queued_render'; logLine(x, `Çıktı hızı x${sp} istendi`); }, `hız x${sp}`);
+        await enqueue('rerender', slug, { speed: sp });
+        toast(`x${sp} sıraya alındı ✓ ${WORKER_NAME} birkaç dakikada yeni sürümü hazırlar (kredi harcamaz)`);
+        delete S.revSpeed[slug]; renderGame(slug);
+      } catch (e) { toast('Kaydedilemedi: ' + e.message, true); sv.disabled = false; }
+    };
+  };
+  bindReviewSpeed();
   $$('.tl-go').forEach((b) => b.onclick = () => seek(b.dataset.t));
   const txt = $('#noteText');
   const addNote = (t, text) => {
@@ -1881,7 +1917,7 @@ async function renderIntegrations() {
 /* ---------- worker durumu (Kağan'ın PC'sindeki arka plan Claude) ---------- */
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; } };
 const JOB_LABEL = { new_game: 'araştırma', regenerate: 'yeniden öneri', materials: 'materyal toplama', build: 'kurgu + ses', revise: 'düzeltme', suggest: 'yeni oyun önerileri',
-  delete_game: `silme (${ADMIN.name})`, refresh_media: 'meme adaylarını yenileme' };
+  delete_game: `silme (${ADMIN.name})`, refresh_media: 'meme adaylarını yenileme', rerender: 'hız uygulama (yeniden render)' };
 function jobName(j) {
   const m = /^\d{8}T\d{6}-([a-z_]+)-(.+)$/.exec(j || '');
   if (!m) return j || '';
@@ -1921,7 +1957,16 @@ function limitView(w, job) {
         : `Limit sıfırlanınca kaldığı yerden kendiliğinden devam edecek.`);
   return { short, long };
 }
+const EFFORTS = [['low', 'Düşük', 'hızlı, az kota'], ['medium', 'Orta', ''], ['high', 'Yüksek', ''],
+  ['xhigh', 'Çok yüksek', 'varsayılan: espri ve kurgu kalitesi'], ['max', 'En yüksek', 'en yavaş, en çok kota']];
+const effortLabel = (v) => (EFFORTS.find((e) => e[0] === v) || EFFORTS[3])[1];
+const workerPaused = () => S.workerCfg?.enabled === false;
+async function loadWorkerCfg() {
+  try { const r = await readJSON('config/worker.json'); S.workerCfg = r?.data || null; S.workerCfgSha = r?.sha; } catch { S.workerCfg = null; }
+}
 function workerView(w0) {
+  if (workerPaused()) return { cls: 'warn', short: '⏸ Duraklatıldı', paused: true,
+    long: `${WORKER_NAME} ${ADMIN.name} tarafından durduruldu${S.workerCfg?.at ? ` (${fmtDate(S.workerCfg.at)})` : ''}; işler sırada bekliyor. ${ADMIN.name} açınca 5 dakika içinde kaldığı yerden devam eder.` };
   if (!w0) return null;
   const w = { ...w0, job: jobName(w0.job) };
   const ageH = (Date.now() - new Date(w.at).getTime()) / 36e5;
@@ -1935,6 +1980,7 @@ function workerView(w0) {
 }
 async function loadWorkerStatus() {
   try { S.worker = (await readJSON('config/worker_status.json'))?.data || null; } catch { S.worker = null; }
+  await loadWorkerCfg();
   const v = workerView(S.worker), el = $('#workerState');
   if (!el) return;
   if (!v) { el.hidden = true; return; }
@@ -1958,9 +2004,16 @@ async function renderTaskList() {
     const files = (await S.store.list('queue')).filter((f) => f.type === 'file' && f.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name));
     jobs = await Promise.all(files.map(async (f) => ({ name: f.name.replace(/\.json$/, ''), ...((await readJSON(`queue/${f.name}`))?.data || {}) })));
   } catch {}
+  await loadWorkerCfg();
   const w = S.worker;
-  const running = ['running', 'limited'].includes(w?.state) ? w.job : null;
+  const paused = workerPaused();
+  const running = !paused && ['running', 'limited'].includes(w?.state) ? w.job : null;
   const v = workerView(w);
+  const eff = S.workerCfg?.effort || 'xhigh';
+  const ctl = isAdmin() ? `<div class="worker-ctl">
+      <div class="seg" id="wkOn" title="Yalnız ${esc(ADMIN.name)}: ${WORKER_NAME}'ı durdur / başlat"><button type="button" data-on="1" class="${paused ? '' : 'on'}">▶ Açık</button><button type="button" data-on="0" class="${paused ? 'on' : ''}">⏸ Kapalı</button></div>
+      <label class="small muted">Effort <select id="wkEffort">${EFFORTS.map(([val, l, h]) => `<option value="${val}" ${eff === val ? 'selected' : ''}>${l}${h ? ` — ${h}` : ''}</option>`).join('')}</select></label>
+    </div>` : `<span class="small muted">effort: ${esc(effortLabel(eff))}</span>`;
   const line = (j, i) => {
     const isRun = j.name === running;
     const title = j.slug === '_suggest' ? 'Öneri havuzu' : S.games.get(j.slug)?.title || j.slug;
@@ -1978,10 +2031,37 @@ async function renderTaskList() {
   const limitRow = isLimit ? `<div class="task-alert warn">⏸ <div>${esc(limitView(w, jobName(w.job)).long)}${jobs.length ? ` <span class="muted">(${jobs.length} iş bekliyor)</span>` : ''}</div></div>`
     : isAuth ? `<div class="task-alert bad">🔒 <div>${esc(v.long)}</div></div>`
     : w?.state === 'error' ? `<div class="task-alert bad">⚠️ <div><b>Son işte hata oldu.</b> ${esc((w.message || '').slice(0, 200))} — 5 dk sonra tekrar denenecek; tekrarlarsa Kağan'a haber verin.</div></div>` : '';
-  box.innerHTML = `<div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span>${state}</div>${limitRow}
+  const pauseRow = paused ? `<div class="task-alert warn">⏸ <div><b>İş listesi duraklatıldı.</b> ${esc(v.long)}${jobs.length ? ` <span class="muted">(${jobs.length} iş bekliyor)</span>` : ''}</div></div>` : '';
+  box.innerHTML = `<div class="row"><h2>🗂️ ${WORKER_NAME}'ın iş listesi</h2><span class="spacer"></span>${state}</div>${ctl}${pauseRow || limitRow}
     ${jobs.length ? `<div class="tasks-list">${jobs.map(line).join('')}</div>
       <p class="small muted" style="margin:8px 0 0">İşler sırayla yapılır; bir araştırma ~15–30 dk sürer. Kağan'ın bilgisayarı kapalıysa açılınca devam eder.</p>`
-    : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, ${WORKER_NAME} yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace(/Son is bitti: (\S+)/, (_, j) => `Son biten iş: ${jobName(j)}`).replace(/kuyrukta (\d+) is var/, 'kuyrukta $1 iş var')) : ''}</p>`}`;
+    : paused ? '<p class="muted small" style="margin:8px 0 0">Kuyruk boş.</p>' : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, ${WORKER_NAME} yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace(/Son is bitti: (\S+)/, (_, j) => `Son biten iş: ${jobName(j)}`).replace(/kuyrukta (\d+) is var/, 'kuyrukta $1 iş var')) : ''}</p>`}`;
+  bindWorkerCtl();
+}
+async function saveWorkerCfg(patch, what) {
+  if (!isAdmin()) return toast(`Yalnız ${ADMIN.name} değiştirebilir`, true);
+  for (let i = 0; i < 3; i++) {
+    const f = await readJSON('config/worker.json');
+    const data = { enabled: true, effort: 'xhigh', ...(f?.data || {}), ...patch, by: S.user, at: nowIso() };
+    try { await S.store.put('config/worker.json', JSON.stringify(data, null, 2) + '\n', `[${S.user}] ${WORKER_NAME}: ${what}`, f?.sha); S.workerCfg = data; return true; }
+    catch (err) { if (!(err.status === 409 || err.status === 422) || i === 2) throw err; }
+  }
+}
+function bindWorkerCtl() {
+  $$('#wkOn button').forEach((b) => b.onclick = async () => {
+    const on = b.dataset.on === '1';
+    if (on === !workerPaused()) return;
+    if (!on && !confirm(`${WORKER_NAME} durdurulsun mu? Sıradaki işler sen açana kadar bekler (çalışan iş yarıda kesilmez, bitince durur).`)) return;
+    try { await saveWorkerCfg({ enabled: on }, on ? 'açıldı' : 'durduruldu'); toast(on ? `${WORKER_NAME} açıldı ✓ (5 dk içinde işe başlar)` : `${WORKER_NAME} durduruldu ⏸`); }
+    catch (e) { toast('Kaydedilemedi: ' + e.message, true); }
+    loadWorkerStatus(); renderTaskList();
+  });
+  const sel = $('#wkEffort');
+  if (sel) sel.onchange = async () => {
+    try { await saveWorkerCfg({ effort: sel.value }, `effort → ${sel.value}`); toast(`Effort: ${effortLabel(sel.value)} ✓ (sıradaki işten itibaren)`); }
+    catch (e) { toast('Kaydedilemedi: ' + e.message, true); }
+    renderTaskList();
+  };
 }
 
 /* ---------- etkinlik akışı (sol panel) ---------- */
