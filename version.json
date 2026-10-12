@@ -1,8 +1,13 @@
 {
- "v": 62,
- "at": "2026-10-12T16:32:59+00:00",
- "msg": "Hız yalnız son video: 'Hızı kaydet' sadece ayar; 'Onayla, bitti' son videoyu kayıtlı hızla ürettirir",
+ "v": 63,
+ "at": "2026-10-12T16:37:04+00:00",
+ "msg": "Hız seçeneklerine 1.25× eklendi",
  "history": [
+  {
+   "v": 63,
+   "at": "2026-10-12T16:37:04+00:00",
+   "msg": "Hız seçeneklerine 1.25× eklendi"
+  },
   {
    "v": 62,
    "at": "2026-10-12T16:32:59+00:00",
@@ -97,11 +102,6 @@
    "v": 41,
    "at": "2026-10-08T03:27:53+00:00",
    "msg": "Kurgu inceleme ekranı: sürümler, oynatıcı, zaman damgalı notlar, ekranda neler var listesi, videoyu yeniden oluştur"
-  },
-  {
-   "v": 40,
-   "at": "2026-10-07T08:38:44+00:00",
-   "msg": "Seçenek ayrıntıları seçilene kadar katlı (mobilde kısa kaydırma)"
   }
  ]
 }

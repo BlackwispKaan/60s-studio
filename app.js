@@ -1357,7 +1357,7 @@ function reviewHtml(g) {
   </section>`;
 }
 /* çıktı hızı: oynatıcıda anında önizle (perde korunur), kaydedince Çırak bu hızla yeni sürüm üretir (kredi harcamaz) */
-const SPEEDS = [1, 1.05, 1.1, 1.15, 1.2];
+const SPEEDS = [1, 1.05, 1.1, 1.15, 1.2, 1.25];
 // Kağan 2026-10-12: hız yalnız SON videoyu belirler — kaydedince yeni sürüm üretilmez; "✓ Onayla, bitti"de son video bu hızla hazırlanır
 function speedBoxHtml(g, sel, live) {
   const base = sel.speed || 1, saved = g.settings?.outputSpeed || 1, want = S.revSpeed[g.slug] ?? saved;
