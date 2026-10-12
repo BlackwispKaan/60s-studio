@@ -32,6 +32,7 @@ const STATUS = {
   review:           { label: 'İncelemede', step: 6 },
   queued_revision:  { label: 'Düzeltme sırada', step: 6 },
   revising:         { label: 'Düzeltiliyor', step: 6 },
+  stopped:          { label: 'Durduruldu', step: 0 },
   queued_render:    { label: 'Hız sırada', step: 6 },
   rendering:        { label: 'Hız uygulanıyor', step: 6 },
   done:             { label: 'Tamamlandı', step: 7 },
@@ -178,6 +179,14 @@ class GitHubStore {
     await post('git/refs', { ref: `refs/heads/${branch}`, sha: commit.sha });
     return { branch, path };
   }
+  // Çalışan işi durdurma sinyali: cancel/<iş> adlı işaret dalı (Çırak `git ls-remote` ile görür, çalışma alanına dokunmaz)
+  async signal(branch) {
+    const head = await this.req(`git/ref/heads/${REPO.branch}`);
+    if (!head) throw new Error('ana dal okunamadı');
+    const r = await this.req('git/refs', { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: head.object.sha }) });
+    if (!r) throw Object.assign(new Error('GitHub 404 (yazma izni yok)'), { status: 404 });
+    return r;
+  }
 }
 class LocalDemoStore {
   // localhost'ta proje klasörü sunuluyorsa (site/ bir alt klasör) dosyaları okur; yazmalar sadece bellekte.
@@ -191,6 +200,7 @@ class LocalDemoStore {
   }
   async put(path, text) { this.mem.set(path, text); return {}; }
   async del(path) { this.mem.set(path, null); return {}; }
+  async signal(branch) { this.mem.set('signal:' + branch, '1'); return {}; }
   async blobUrl(path) {
     // GitHub'daki gibi blob: oynatıcıda ileri/geri sarma yerel sunucunun Range desteğine bağlı kalmasın
     const r = await fetch(`../${path}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -227,7 +237,8 @@ const S = {
   saveTimers: new Map(),
   revView: {}, // slug -> incelenen sürüm
   revTime: {}, // slug -> oynatıcı konumu (yeniden çizimde korunur)
-  revSpeed: {}, // slug -> İnceleme'de denenen çıktı hızı (kaydedilene kadar yalnız önizleme)
+  revSpeed: {}, // slug -> İnceleme'de seçilen son video hızı ("✓ Onayla, bitti"de uygulanır)
+  cancelling: {}, // iş adı -> iptal sinyali gönderildi (Çırak durdurana kadar)
   pubEdit: {}, // slug -> yayın linki düzenleniyor
   revDraft: {}, // slug -> yazılmakta olan not
   mediaOpen: {}, // slug -> incelemede materyal kartı açık mı
@@ -1359,15 +1370,19 @@ function reviewHtml(g) {
 /* çıktı hızı: oynatıcıda anında önizle (perde korunur), kaydedince Çırak bu hızla yeni sürüm üretir (kredi harcamaz) */
 const SPEEDS = [1, 1.05, 1.1, 1.15, 1.2, 1.25];
 // Kağan 2026-10-12: hız yalnız SON videoyu belirler — kaydedince yeni sürüm üretilmez; "✓ Onayla, bitti"de son video bu hızla hazırlanır
+// Kayıt adımı yok (Kağan 2026-10-12): seçili hız oynatıcıda önizlenir, "✓ Onayla, bitti" deyince son video o hızla hazırlanır
+const SPEED_MIN = 0.8, SPEED_MAX = 2;
+const clampSpeed = (x) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, +x || 1)) * 100) / 100;
+const pickedSpeed = (g) => S.revSpeed[g.slug] ?? (g.settings?.outputSpeed || 1);
+const finalDur = (g, sel, sp) => (sel?.duration ? Math.round(sel.duration * (sel.speed || 1) / sp) : null);
 function speedBoxHtml(g, sel, live) {
-  const base = sel.speed || 1, saved = g.settings?.outputSpeed || 1, want = S.revSpeed[g.slug] ?? saved;
-  const total = sel.duration ? Math.round(sel.duration * base / want) : null;
+  const want = pickedSpeed(g), total = finalDur(g, sel, want);
   return `<div class="speed-box">
     <span class="small" style="font-weight:600">Son video hızı</span>
     <div class="seg" id="speedSeg">${SPEEDS.map((x) => `<button type="button" data-sp="${x}" class="${Math.abs(x - want) < 1e-6 ? 'on' : ''}">${x}×</button>`).join('')}</div>
-    <span class="small muted">${total ? `≈ ${total} sn` : ''}</span>
-    ${live && Math.abs(want - saved) > 1e-6 ? `<button type="button" class="btn btn-primary" id="speedSave">Hızı kaydet (x${want})</button>` : ''}
-    <span class="small muted">${saved !== 1 ? `Kayıtlı: x${saved} · “Onayla, bitti” deyince son video bu hızla hazırlanır` : 'Oynatıcıda önizlenir; kaydedersen onayda uygulanır'}</span>
+    <label class="small muted speed-custom">özel <input type="number" id="speedCustom" min="${SPEED_MIN}" max="${SPEED_MAX}" step="0.01" value="${want}"> ×</label>
+    <span class="small" id="speedDur"><b>${total ? `≈ ${total} sn` : ''}</b></span>
+    <span class="small muted">${live ? '“✓ Onayla, bitti” deyince son video bu hızla hazırlanır' : 'Oynatıcıda önizleme'}</span>
   </div>`;
 }
 function mediaCardHtml(g, ed) {
@@ -1413,18 +1428,23 @@ function bindReview(slug) {
   const selV = () => { const vs = cur().versions || []; return vs.find((x) => x.v === S.revView[slug]) || latestVersion(cur()); };
   const applyRate = () => { if (!v) return; const want = S.revSpeed[slug] ?? (cur().settings?.outputSpeed || 1); v.preservesPitch = true; v.playbackRate = want / (selV().speed || 1); };
   if (v) { v.addEventListener('loadedmetadata', applyRate); applyRate(); }
+  const redrawSpeed = () => {
+    const box = $('.speed-box');
+    if (box) box.outerHTML = speedBoxHtml(cur(), selV(), stOf(cur()) === 'review' && selV().v === latestVersion(cur()).v);
+    bindReviewSpeed(); applyRate();
+  };
   const bindReviewSpeed = () => {
-    $$('#speedSeg button').forEach((b) => b.onclick = () => { S.revSpeed[slug] = +b.dataset.sp; const box = $('.speed-box');
-      if (box) box.outerHTML = speedBoxHtml(cur(), selV(), stOf(cur()) === 'review' && selV().v === latestVersion(cur()).v); bindReviewSpeed(); applyRate(); });
-    const sv = $('#speedSave');
-    if (sv) sv.onclick = async () => {
-      const sp = S.revSpeed[slug]; sv.disabled = true;
-      try {
-        await mutateGame(slug, (x) => { x.settings = x.settings || {}; x.settings.outputSpeed = sp; logLine(x, `Son video hızı x${sp} olarak kaydedildi`); }, `hız x${sp}`);
-        toast(`Kaydedildi ✓ “Onayla, bitti” deyince son video x${sp} hızla hazırlanır`);
-        delete S.revSpeed[slug]; renderGame(slug);
-      } catch (e) { toast('Kaydedilemedi: ' + e.message, true); sv.disabled = false; }
-    };
+    $$('#speedSeg button').forEach((b) => b.onclick = () => { S.revSpeed[slug] = +b.dataset.sp; redrawSpeed(); });
+    const ci = $('#speedCustom');
+    if (ci) {
+      ci.oninput = () => {  // yazarken süre ve oynatıcı hızı anında
+        const sp = clampSpeed(ci.value), d = finalDur(cur(), selV(), sp), el = $('#speedDur');
+        if (el) el.innerHTML = `<b>${d ? `≈ ${d} sn` : ''}</b>`;
+        if (v) { v.preservesPitch = true; v.playbackRate = sp / (selV().speed || 1); }
+        $$('#speedSeg button').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.sp - sp) < 1e-6));
+      };
+      ci.onchange = () => { S.revSpeed[slug] = clampSpeed(ci.value); redrawSpeed(); };
+    }
   };
   bindReviewSpeed();
   $$('.tl-go').forEach((b) => b.onclick = () => seek(b.dataset.t));
@@ -1488,11 +1508,15 @@ function bindReview(slug) {
   };
   const ap = $('#approve');
   if (ap) ap.onclick = async () => {
+    if (ap.disabled || BUSY.includes(stOf(cur()))) return;  // çift tıklama: aynı son video işi iki kez kuyruğa girmesin
     if (pendingChanges(cur()) && !confirm('Gönderilmemiş notlar / materyal değişiklikleri var. Yine de onaylansın mı?')) return;
+    ap.disabled = true;
     await flush(slug);
-    const sp = cur().settings?.outputSpeed || 1, lvs = latestVersion(cur()).speed || 1;
-    if (Math.abs(sp - lvs) > 1e-6) {  // kayıtlı hız → son video o hızla (Çırak, kredisiz), bitince "Tamamlandı"
-      await mutateGame(slug, (x) => { x.status = 'queued_render'; logLine(x, `v${latestVersion(x).v} onaylandı; son video x${sp} hızla hazırlanıyor.`); }, `onaylandı · hız x${sp}`);
+    const sp = pickedSpeed(cur()), lv0 = latestVersion(cur()), lvs = lv0.speed || 1;
+    if (Math.abs(sp - lvs) > 1e-6) {  // seçili hız → son video o hızla (Çırak, kredisiz), bitince "Tamamlandı"
+      if (!confirm(`Son video x${sp} hızla (≈ ${finalDur(cur(), lv0, sp)} sn) hazırlanacak ve oyun tamamlanacak. Onaylıyor musun?`)) { ap.disabled = false; return; }
+      await mutateGame(slug, (x) => { x.settings = x.settings || {}; x.settings.outputSpeed = sp; x.status = 'queued_render';
+        logLine(x, `v${latestVersion(x).v} onaylandı; son video x${sp} hızla hazırlanıyor.`); }, `onaylandı · hız x${sp}`);
       await enqueue('rerender', slug, { speed: sp, final: true });
       toast(`Onaylandı ✓ ${WORKER_NAME} son videoyu x${sp} hızla hazırlıyor (birkaç dakika, kredi harcamaz)`); renderGame(slug);
       return;
@@ -1517,6 +1541,8 @@ async function renderGame(slug) {
   let body = '', footer = '';
   if (g.deleteRequested) body += `<div class="card del-banner">🗑 <b>${esc(g.deleteRequested.by || ADMIN.name)}</b> bu oyunun silinmesini istedi; ${WORKER_NAME} birkaç dakika içinde kaldıracak.
     ${isAdmin() ? '<button type="button" class="btn btn-ghost small" id="undoDelete">Vazgeç</button>' : ''}</div>`;
+  if (st === 'stopped') body += `<div class="card" style="border-color:var(--warn)">⏹ <b>${esc(JOB_LABEL[g.stoppedJob?.type] || 'iş')}</b> iptal edildi${g.stoppedJob?.by ? ` (${esc(g.stoppedJob.by)})` : ''}.
+    <button type="button" class="btn btn-primary small" id="restartJob" style="margin-left:8px">▶ Yeniden başlat</button></div>`;
   if (['queued_research', 'researching'].includes(st)) {
     body += `<div class="card empty"><span class="spinner"></span><h2 style="margin-top:12px">${st === 'researching' ? `${WORKER_NAME} araştırıyor…` : `${WORKER_NAME} araştırma yapacak`}</h2>
       <p class="muted">Oyunu ve topluluğun esprilerini (Reddit, Steam, YouTube yorumları…) araştırıyor. Kağan'ın bilgisayarı açıkken işlenir; metin seçenekleri hazır olunca burada görünür.</p></div>`;
@@ -1597,6 +1623,17 @@ function bindGame(slug) {
   const take = $('#takeOwner');
   if (take) take.onclick = () => { queueOp(slug, (x) => { x.owners = [...new Set([...owners(x), S.user])]; x.owner = x.owners[0]; logLine(x, `${S.user} projeye katıldı.`); }, 'çalışan eklendi'); renderGame(slug); };
   $('#editGame').onclick = () => editGameModal(slug);
+  const rj = $('#restartJob');
+  if (rj) rj.onclick = async () => {
+    const sj = g.stoppedJob || { type: 'new_game', payload: {} };
+    const START = { new_game: 'queued_research', regenerate: 'queued_regen', materials: 'queued_materials', build: 'queued_build' };
+    rj.disabled = true;
+    try {
+      await mutateGame(slug, (x) => { x.status = START[sj.type] || 'queued_research'; delete x.stoppedJob; logLine(x, `“${JOB_LABEL[sj.type] || sj.type}” yeniden başlatıldı.`); }, 'iş yeniden başlatıldı');
+      await enqueue(sj.type, slug, sj.payload || {});
+      toast('Sıraya alındı ✓'); renderGame(slug);
+    } catch (e) { toast('Başlatılamadı: ' + e.message, true); rj.disabled = false; }
+  };
   const ud = $('#undoDelete');
   if (ud) ud.onclick = async () => {
     try {
@@ -2030,6 +2067,7 @@ async function renderTaskList() {
       <span class="task-n">${isRun ? (w.state === 'limited' ? '⏸' : '▶') : i + 1}</span>
       <div style="flex:1;min-width:0"><b>${esc(title)}</b>: ${esc(JOB_LABEL[j.type] || j.type)}${esc(extra)}
         <div class="small muted">${esc(j.by || '?')} istedi · ${isRun ? (w.state === 'limited' ? 'limit nedeniyle yarım kaldı' : `çalışıyor (${sinceText(w.at)})`) : `sırada (${sinceText(j.at)})`}</div></div>
+      ${canCancel(j, isRun) ? `<button type="button" class="btn btn-ghost small task-x" data-cancel="${esc(j.name)}" title="${isRun ? 'Çalışan işi durdur' : 'Sıradan çıkar'}">${S.cancelling[j.name] ? '⏳ iptal ediliyor' : '✕ İptal'}</button>` : ''}
       <a class="small" href="${j.slug === '_suggest' ? '#/' : `#/game/${encodeURIComponent(j.slug)}`}">aç →</a>
     </div>`;
   };
@@ -2045,6 +2083,46 @@ async function renderTaskList() {
       <p class="small muted" style="margin:8px 0 0">İşler sırayla yapılır; bir araştırma ~15–30 dk sürer. Kağan'ın bilgisayarı kapalıysa açılınca devam eder.</p>`
     : paused ? '<p class="muted small" style="margin:8px 0 0">Kuyruk boş.</p>' : `<p class="muted small" style="margin:8px 0 0">Kuyruk boş, ${WORKER_NAME} yeni iş bekliyor. ${w?.message && w.state === 'idle' ? esc(w.message.replace(/Son is bitti: (\S+)/, (_, j) => `Son biten iş: ${jobName(j)}`).replace(/kuyrukta (\d+) is var/, 'kuyrukta $1 iş var')) : ''}</p>`}`;
   bindWorkerCtl();
+  $$('[data-cancel]').forEach((b) => b.onclick = () => { const j = jobs.find((x) => x.name === b.dataset.cancel); if (j) cancelJob(j, j.name === running); });
+}
+/* ---------- iş iptali (Kağan 2026-10-12): Kağan her işi, ekip kendi işini iptal eder ---------- */
+const canCancel = (j, isRun) => !!S.user && (isAdmin() || j.by === S.user) && !S.cancelling[j.name]
+  && !(isRun && j.type === 'rerender') && !(j.type === 'delete_game' && !isAdmin());
+function restoreAfterCancel(x, j) {
+  const t = j.type, pl = j.payload || {};
+  if (t === 'new_game') { x.status = 'stopped'; x.stoppedJob = { type: t, payload: pl, by: S.user, at: nowIso() }; }
+  else if (t === 'regenerate') x.status = 'script';
+  else if (t === 'materials') {
+    if (pl.regather) { (x.regathers || []).forEach((r) => { if (r.id === pl.regather) r.status = 'cancelled'; }); x.status = 'materials'; }
+    else x.status = 'script';
+  } else if (t === 'build') x.status = 'materials';
+  else if (t === 'revise') {
+    const rev = (x.revisions || []).find((r) => r.id === pl.revision);
+    if (rev && rev.status !== 'done') {
+      rev.status = 'cancelled';
+      x.reviewNotes = [...(x.reviewNotes || []), ...(rev.notes || []).map(({ reply: _r, state: _s, ...n }) => ({ ...n, v: rev.v }))];
+      if (rev.general && !x.reviewGeneral) x.reviewGeneral = rev.general;
+    }
+    x.status = 'review';
+  } else if (t === 'rerender') x.status = 'review';
+  else if (t === 'delete_game') delete x.deleteRequested;
+  logLine(x, `“${JOB_LABEL[t] || t}” işi iptal edildi.`);
+}
+async function cancelJob(j, isRun) {
+  const title = j.slug === '_suggest' ? 'Öneri havuzu' : S.games.get(j.slug)?.title || j.slug;
+  if (!confirm(`“${title}: ${JOB_LABEL[j.type] || j.type}” iptal edilsin mi?${isRun ? `\n${WORKER_NAME} bu işi şu an yapıyor: yarıda kesilir, bu oyundaki yarım kalan değişiklikler geri alınır.` : ''}`)) return;
+  try {
+    if (isRun) {
+      await S.store.signal(`cancel/${j.name}`);
+      S.cancelling[j.name] = true;
+      toast(`İptal sinyali gönderildi ✓ ${WORKER_NAME} en geç ~1 dk içinde durdurur`);
+    } else {
+      await S.store.del(`queue/${j.name}.json`, `[${S.user}] iş iptal: ${j.type} ${j.slug}`);
+      if (j.slug !== '_suggest' && S.games.has(j.slug)) await mutateGame(j.slug, (x) => restoreAfterCancel(x, j), 'iş iptal edildi');
+      toast('İptal edildi ✓');
+    }
+  } catch (e) { toast('İptal edilemedi: ' + e.message, true); }
+  renderTaskList();
 }
 async function saveWorkerCfg(patch, what) {
   if (!isAdmin()) return toast(`Yalnız ${ADMIN.name} değiştirebilir`, true);

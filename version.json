@@ -1,8 +1,13 @@
 {
- "v": 63,
- "at": "2026-10-12T16:37:04+00:00",
- "msg": "Hız seçeneklerine 1.25× eklendi",
+ "v": 65,
+ "at": "2026-10-12T16:51:16+00:00",
+ "msg": "Hız: kayıt adımı kalktı + özel değer (süre anında); Çırak işlerine iptal (sıradaki/çalışan); onay çift tıklama koruması; Durduruldu kartı",
  "history": [
+  {
+   "v": 65,
+   "at": "2026-10-12T16:51:16+00:00",
+   "msg": "Hız: kayıt adımı kalktı + özel değer (süre anında); Çırak işlerine iptal (sıradaki/çalışan); onay çift tıklama koruması; Durduruldu kartı"
+  },
   {
    "v": 63,
    "at": "2026-10-12T16:37:04+00:00",
@@ -97,11 +102,6 @@
    "v": 42,
    "at": "2026-10-08T10:38:59+00:00",
    "msg": "İncelemede meme/seçenek seçimi değiştirilebilir; seçim değişiklikleri yeniden oluşturmaya eklenir"
-  },
-  {
-   "v": 41,
-   "at": "2026-10-08T03:27:53+00:00",
-   "msg": "Kurgu inceleme ekranı: sürümler, oynatıcı, zaman damgalı notlar, ekranda neler var listesi, videoyu yeniden oluştur"
   }
  ]
 }
